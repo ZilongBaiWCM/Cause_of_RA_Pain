@@ -1,0 +1,1414 @@
+---
+title: "Updated Final Circos plots for Dana paper"
+author: "Nick Bartelo"
+date: "6/24/2022"
+output: html_document
+---
+
+First we import the packages we may use.
+
+```{r, warning=FALSE, message = FALSE}
+library(SingleCellExperiment)
+library(ggplot2)
+library(magrittr)
+library(DESeq2)
+library(dplyr)
+#install.packages("factoextra")
+library(factoextra)
+#BiocManager::install("clusterProfiler")
+library(enrichplot)
+library(org.Hs.eg.db) # Gene Ontology
+library(clusterProfiler)
+#BiocManager::install('M3C')
+library(M3C) # TSNE
+library(umap) # umap
+library(cluster)
+#install.packages('amap')
+library(amap) # Kmeans
+library(tidyverse)  # data manipulation
+library(dendextend) # for comparing two dendrograms
+# load library
+library(ggrepel) # Volcano plot
+library(tidyverse)
+library(readxl)
+#install.packages('xlsx')
+library(xlsx)
+library(data.table)
+```
+
+Below we import the data.
+
+```{r}
+# Ligand-coding genes from hDRG bulk RNA-sequencing results
+hdrg_f1 <- read.csv('hDRG_ligand_RA_receptor_pairs_Seurat_Fibroblast_vsOthers_padj_genes_f1_yes_c19.csv', row.names = 1)
+hdrg_f2 <- read.csv('hDRG_ligand_RA_receptor_pairs_Seurat_Fibroblast_vsOthers_padj_genes_f2_yes_c19.csv', row.names = 1)
+hdrg_f3 <- read.csv('hDRG_ligand_RA_receptor_pairs_Seurat_Fibroblast_vsOthers_padj_genes_f3_yes_c19.csv', row.names = 1)
+hdrg_f4 <- read.csv('hDRG_ligand_RA_receptor_pairs_Seurat_Fibroblast_vsOthers_padj_genes_f4_yes_c19.csv', row.names = 1)
+
+# Ligand-coding genes from the RA single-cell RNA-sequencing results
+ra_sc_f1 <- read.csv('RA_ligand_hDRG_receptor_pairs_Seurat_Fibroblast_vsOthers_padj_genes_f1_yes_c19.csv', row.names = 1)
+ra_sc_f2 <- read.csv('RA_ligand_hDRG_receptor_pairs_Seurat_Fibroblast_vsOthers_padj_genes_f2_yes_c19.csv', row.names = 1)
+ra_sc_f3 <- read.csv('RA_ligand_hDRG_receptor_pairs_Seurat_Fibroblast_vsOthers_padj_genes_f3_yes_c19.csv', row.names = 1)
+ra_sc_f4 <- read.csv('RA_ligand_hDRG_receptor_pairs_Seurat_Fibroblast_vsOthers_padj_genes_f4_yes_c19.csv', row.names = 1)
+```
+
+Below we add a variable to each dataframe in order to identify if the genes are from the hDRG or RA single-cell results.
+
+```{r}
+hdrg_f1$location <- 'hDRG'
+ra_sc_f1$location <- 'RA sc'
+hdrg_f2$location <- 'hDRG'
+ra_sc_f2$location <- 'RA sc'
+hdrg_f3$location <- 'hDRG'
+ra_sc_f3$location <- 'RA sc'
+hdrg_f4$location <- 'hDRG'
+ra_sc_f4$location <- 'RA sc'
+```
+
+Below we combine the data.
+
+```{r}
+f1_data <- rbind(hdrg_f1, ra_sc_f1)
+f2_data <- rbind(hdrg_f2, ra_sc_f2)
+f3_data <- rbind(hdrg_f3, ra_sc_f3)
+f4_data <- rbind(hdrg_f4, ra_sc_f4)
+```
+
+Below we show the number of unique genes in each file for the ligands and the receptors.
+
+```{r}
+length(unique(f1_data$ligand_gname))
+length(unique(f2_data$ligand_gname))
+length(unique(f3_data$ligand_gname))
+length(unique(f4_data$ligand_gname))
+
+length(unique(f1_data$receptor_gname))
+length(unique(f2_data$receptor_gname))
+length(unique(f3_data$receptor_gname))
+length(unique(f4_data$receptor_gname))
+
+```
+
+Below we show the general framework for how to make the interaction plot we want. This uses the BioCircos package. We use these references : https://cran.r-project.org/web/packages/BioCircos/vignettes/BioCircos.html and https://rdrr.io/cran/BioCircos/man/BioCircosLinkTrack.html and http://bioinfo.ibp.ac.cn/biocircos/document/biocircos.html and the github for the package is https://github.com/YaCui/Biocircos.js 
+
+Below we create the interaction plot for F1 with the hDRG and RA scRNA results on the outside, and the ligand/receptor information on the inside. I think we can use one circle since all genes are either ligand or receptor, with no overlap as there was for the hDRG and RA scRNA genes. We will fill this whole with another colored track.
+
+```{r, fig.height=10,fig.width=10}
+library(BioCircos)
+
+# Chromosomes on which the hDRG points should be displayed
+points_chromosomes_hdrg = c('hDRG', 'hDRG')
+# Coordinates on which the hDRG points should be displayed (length.out = 38 because there are 38 unique genes in the hDRG from the ligand (left column) and receptor data (right column) in f1_data)
+points_coordinates_hdrg = seq(3, 276, length.out = 38)
+# Values associated with each point, used as radial coordinate 
+# We space them out according to the number of unique ligands in F1 here
+points_values_hdrg = 1:length(points_chromosomes_hdrg)
+
+# Size of the outside of the circle for hdrg and ra
+# Since there are uniquely 38 hdrg and 11 RA genes, we make the slices of the circle 360 - (38/49*360) = 279 for the hdrg and 360 - 279 for the receptor
+myGenome = list("hDRG" = 279,
+        "RA" = 81)
+
+# Create circle for hDRG and RA identification to lie in
+tracklist = BioCircosBackgroundTrack("myBackgroundTrack", minRadius = 0.99, maxRadius = 1.09,
+  borderColors = "#AAAAAA", borderSize = 0.6, fillColors = "White") 
+
+tracklist = tracklist + BioCircosSNPTrack('Gene Type', points_chromosomes_hdrg, points_coordinates_hdrg[1:24], 
+  points_values_hdrg, colors = c("orange", "orange", "orange", "orange", "orange", "orange", "orange", "orange", "orange", "orange", "orange", "orange", "orange", "orange", "orange", "orange", "orange", "orange", "orange", "orange", "orange", "orange", "orange", "orange"), minRadius = 1.04, maxRadius = 1.04)
+
+tracklist = tracklist + BioCircosSNPTrack('Gene Type', points_chromosomes_hdrg, seq(3, 276, length.out = 38)[25:38], 
+  points_values_hdrg, colors = c("blue", "blue", "blue", "blue", "blue", "blue", "blue", "blue", "blue", "blue", "blue", "blue", "blue", "blue"), size = 4, minRadius = 1.04, maxRadius = 1.04, shape = 'rect')
+
+# Chromosomes on which the RA scRNA points should be displayed
+points_chromosomes_ra = c('RA', 'RA')
+# Coordinates on which the RA scRNA points should be displayed length.out = 11 because there are 11 unique genes in the RA scRNA from the ligand (left column) and receptor data (right column) in f1_data)
+points_coordinates_ra = seq(3, 78, length.out = 11)
+# Values associated with each point, used as radial coordinate 
+# We space them out according to the number of unique RA scRNA genes in F1 here
+points_values_ra = 1:length(points_chromosomes_ra)
+
+tracklist = tracklist + BioCircosSNPTrack('Gene Type', points_chromosomes_ra, points_coordinates_ra[1:6], 
+  points_values_ra, colors = c("blue", "blue", "blue", "blue", "blue", "blue"), minRadius = 1.04, maxRadius = 1.04, shape = 'rect', size = 4)
+
+tracklist = tracklist + BioCircosSNPTrack('Gene Type', points_chromosomes_ra, points_coordinates_ra[7:11], 
+  points_values_ra, colors = c("orange", "orange", "orange", "orange", "orange"), minRadius = 1.04, maxRadius = 1.04)
+
+#tracklist = tracklist + BioCircosTextTrack("testText", 'Subtype F1 hDRG and RA Interactions', weight = "bold", size = '1em', x = -0.6, y = -1.25, displayGenomeBorder = TRUE)
+
+links_chromosomes_1 = c('hDRG', 'hDRG', 'hDRG') # Chromosomes on which the links should start
+links_chromosomes_2 = c('RA', 'RA', 'RA') # Chromosomes on which the links should end
+
+# Coordinates to place start of links. The coordinates below correspond to the sequence given by seq(3, 276, length.out = 38) Their starting coordinate must be repeated for the number of connections between them and the number of RA genes they are connected to.
+links_pos_1 = c(3, 10.38, 17.76, 25.13, 32.51, 39.89, 47.27, 54.65, 62.03,  69.41, 76.78, 84.16, 91.54, 98.92, 106.30, 113.68, 121.05, 128.43, 135.81, 143.19, 150.57, 157.95, 165.32, 172.70, 180.08, 187.46, 194.84, 202.22, 209.59, 216.97, 224.35, 231.73, 239.11, 216.97, 246.49, 253.86, 261.24, 268.62, 276)
+# Coordinates to place end of links. The coordinates below correspond to the sequence given by seq(3, 78, length.out = 11) but we have 39 values in total. Their ending coordinate must be repeated for the number of connections between them and the number of hdrg genes they are connected to.
+links_pos_2 = c(3, 10.5, 3, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 25.5, 33, 33, 40.5, 25.5, 25.5, 18, 25.5, 33, 33, 33, 48, 55.5, 55.5, 55.5, 55.5, 55.5, 55.5, 55.5, 63, 63, 63, 63, 70.5, 70.5, 78)
+# The labels are given at the end of the link. Therefore, we label the RA scRNA when starting at the hDRG for linking.
+links_labels_12 = c('PLSCR4', 'ACKR3', '', 'FGFR1', '', '', '', '', '', '', '', '', '', 'PTPRS', 'TGFBR3', '', 'LPAR1', '', '', '', '', '', '', '', "ANGPTL2", "CTGF", '', '', '', '', '', '', 'TFPI', '', '', '', 'TIMP2', '', 'TIMP3') # 39
+
+tracklist = tracklist + BioCircosLinkTrack('myLinkTrack', links_chromosomes_1, links_pos_1,
+  links_pos_1, links_chromosomes_2, links_pos_2, links_pos_2,
+  maxRadius = 0.7, width = "0.03em", color = 'cyan', labelSize = "0.8em", labels = links_labels_12)
+
+links_chromosomes_3 = c('RA', 'RA', 'RA') # Chromosomes on which the links should start
+links_chromosomes_4 = c('hDRG', 'hDRG', 'hDRG') # Chromosomes on which the links should end
+
+# Now we start at the RA scRNA
+links_pos_3 = c(3, 10.5, 3, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 25.5, 33, 33, 40.5, 25.5, 25.5, 18, 25.5, 33, 33, 33, 48, 55.5, 55.5, 55.5, 55.5, 55.5, 55.5, 55.5, 63, 63, 63, 63, 70.5, 70.5, 78)
+# Now we end at the hDRG
+links_pos_4 = c(3, 10.38, 17.76, 25.13, 32.51, 39.89, 47.27, 54.65, 62.03,  69.41, 76.78, 84.16, 91.54, 98.92, 106.30, 113.68, 121.05, 128.43, 135.81, 143.19, 150.57, 157.95, 165.32, 172.70, 180.08, 187.46, 194.84, 202.22, 209.59, 216.97, 224.35, 231.73, 239.11, 216.97, 246.49, 253.86, 261.24, 268.62, 276)
+# These links are for the ligands
+links_labels_34 = c("C1orf112", "CXCL12", "EFEMP2", "FGF1", "FGF2", "FGF5", "FGF7", "FGF9", "FGF10", "FGF11", "FGF12", "FGF13", "FGF18", "HSPG2", "INHA", "INHBA", "LIPH", "LRFN4", "LRRC4B", "NCAM1", "PTN", "TGFB1", "TGFB2", "TGFB3", "TIE1", "ERBB4", 'ITGA5', 'ITGAM', 'ITGB2', 'LRP1', 'LRP6', 'NTRK1', 'F3', '', 'SDC4', 'VLDLR', 'ITGA3', 'ITGB1', 'KDR')
+
+tracklist = tracklist + BioCircosLinkTrack('myLinkTrack', links_chromosomes_3, links_pos_3,
+  links_pos_3, links_chromosomes_4, links_pos_4, links_pos_4,
+  maxRadius = 0.7, width = "0.03em", color = 'cyan', labelSize = "0.8em", labels = links_labels_34, labelPadding = 3)
+
+links_chromosomes_5 = c('hDRG', 'hDRG', 'hDRG') # Chromosomes on which the links should start
+links_chromosomes_6 = c('RA', 'RA', 'RA') # Chromosomes on which the links should end
+links_pos_5 = c(180.08, 187.46, 194.84, 202.22, 209.59, 216.97, 224.35, 231.73, 239.11, 216.97, 246.49, 253.86, 261.24, 268.62, 276)
+links_pos_6 = c(48, 55.5, 55.5, 55.5, 55.5, 55.5, 55.5, 55.5, 63, 63, 63, 63, 70.5, 70.5, 78)
+links_labels_56 = c("", "", '', '', '', '', '', '', "", '', '', '', "", '', "")
+
+tracklist = tracklist + BioCircosLinkTrack('myLinkTrack', links_chromosomes_5, links_pos_5,
+  links_pos_5, links_chromosomes_6, links_pos_6, links_pos_6,
+  maxRadius = 0.7, width = "0.03em", color = 'brown', labelSize = "0.5em", labels = links_labels_56)
+
+# Create inside arc for RA scRNA gene identification
+arcs_chromosomes_ra = c('RA') # Chromosomes on which the arcs should be displayed
+arcs_begin_ra = c(0)
+arcs_end_ra = c(81)
+
+tracklist = tracklist + BioCircosArcTrack('myArcTrack', arcs_chromosomes_ra, arcs_begin_ra, arcs_end_ra, minRadius = 1.10, maxRadius = 1.15, colors = 'forestgreen') 
+
+# Create inside arc for RA scRNA gene identification
+arcs_chromosomes_hdrg = c('hDRG') # Chromosomes on which the arcs should be displayed
+arcs_begin_hdrg = c(0)
+arcs_end_hdrg = c(279)
+
+tracklist = tracklist + BioCircosArcTrack('myArcTrack', arcs_chromosomes_hdrg, arcs_begin_hdrg, arcs_end_hdrg, minRadius = 1.15, maxRadius = 1.20, colors = 'deeppink3')
+
+tracklist = tracklist + BioCircosTextTrack('MytextTrack', 'CD34+ sublining fibroblasts (SC-F1)', x = -0.6, y = -1.25, size = "1em",
+  weight = "bold", opacity = 1, color = "#000000")
+
+tracklist = tracklist + BioCircosTextTrack('MytextTrack', 'hDRG', x = 0.55, y = 1.15, size = "1em",
+  weight = "bold", opacity = 1, color = "#000000")
+
+tracklist = tracklist + BioCircosTextTrack('MytextTrack', 'RA', x = -0.7, y = -1, size = "1em",
+  weight = "bold", opacity = 1, color = "#000000")
+
+BioCircos(tracklist, genome = myGenome, genomeFillColor = c('white', 'white'), chrPad = 0.05, displayGenomeBorder = FALSE, yChr =  FALSE,
+  genomeTicksDisplay = FALSE,  genomeLabelTextSize = 0, genomeLabelDy = 0, width = 650, height = 650)
+```
+
+Below we create the interaction plot for F2 with the hDRG and RA scRNA results on the outside, and the ligand/receptor information on the inside. I think we can use one circle since all genes are either ligand or receptor, with no overlap as there was for the hDRG and RA scRNA genes. We will fill this whole with another colored track.
+
+```{r, fig.height=10,fig.width=10}
+library(BioCircos)
+
+# Chromosomes on which the hDRG points should be displayed
+points_chromosomes_hdrg_f2 = c('hDRG', 'hDRG')
+# Coordinates on which the hDRG points should be displayed (length.out = 45 because there are 45 unique genes in the hDRG from the ligand (left column) and receptor data (right column) in f1_data AND WE ALSO ADD ITGB5 SINCE THIS IS IN BOTH HDRG AND RA SO WE END WITH 46)
+points_coordinates_hdrg_f2 = seq(3, 297, length.out = 46)
+# Values associated with each point, used as radial coordinate 
+# We space them out according to the number of unique ligands in F2 here
+points_values_hdrg_f2 = 1:length(points_chromosomes_hdrg_f2)
+
+# Size of the outside of the circle for hdrg and ra
+# Since there are uniquely 45 hdrg and 9 RA genes, we make the slices of the circle 360 - (45/54*360) = 300 for the hdrg and 360 - 300 because there is overlap between the hDRG and RA for LTBP3 
+myGenome_f2 = list("hDRG" = 300,
+        "RA" = 60)
+
+# Create circle for hDRG and RA identification to lie in
+tracklist_f2 = BioCircosBackgroundTrack("myBackgroundTrack", minRadius = 0.99, maxRadius = 1.09,
+  borderColors = "#AAAAAA", borderSize = 0.6, fillColors = "White") 
+
+tracklist_f2 = tracklist_f2 + BioCircosSNPTrack('Gene Type', points_chromosomes_hdrg_f2, seq(3, 297, length.out = 46)[2:22], 
+  points_values_hdrg_f2, colors = c("orange", "orange", "orange", "orange", "orange", "orange", "orange", "orange", "orange", "orange", "orange", "orange", "orange", "orange", "orange", "orange", "orange", "orange", "orange", "orange", "orange"), minRadius = 1.04, maxRadius = 1.04)
+
+tracklist_f2 = tracklist_f2 + BioCircosSNPTrack('Gene Type', points_chromosomes_hdrg_f2, seq(3, 297, length.out = 46)[1], 
+  points_values_hdrg_f2, colors = c("blue"), size = 4, minRadius = 1.04, maxRadius = 1.04, shape = 'rect')
+
+tracklist_f2 = tracklist_f2 + BioCircosSNPTrack('Gene Type', points_chromosomes_hdrg_f2, seq(3, 297, length.out = 46)[23:46], 
+  points_values_hdrg_f2, colors = c("blue", "blue", "blue", "blue", "blue", "blue", "blue", "blue", "blue", "blue", "blue", "blue", "blue", "blue", "blue", "blue", "blue", "blue", "blue", "blue", "blue", "blue", "blue",  "blue"), size = 4, minRadius = 1.04, maxRadius = 1.04, shape = 'rect')
+
+# Chromosomes on which the RA scRNA points should be displayed
+points_chromosomes_ra_f2 = c('RA', 'RA')
+# Coordinates on which the RA scRNA points should be displayed length.out = 9-2 because there are 7 unique genes in the RA scRNA from the ligand (left column) and receptor data (right column) in f2_data) WE SUBTRACT 2 BECAUSE WE ACCOUNT FOR LTBP3 AND ITGB5 IN THE HDRG VALUES
+points_coordinates_ra_f2 = seq(3, 57, length.out = 9-2)
+# Values associated with each point, used as radial coordinate 
+# We space them out according to the number of unique RA scRNA genes in F1 here
+points_values_ra_f2 = 1:length(points_chromosomes_ra_f2)
+
+tracklist_f2 = tracklist_f2 + BioCircosSNPTrack('Gene Type', points_chromosomes_ra_f2, seq(3, 57, length.out = 9-2)[3:7], 
+  points_values_ra_f2, colors = c("orange", "orange", "orange", "orange", "orange"), minRadius = 1.04, maxRadius = 1.04)
+
+tracklist_f2 = tracklist_f2 + BioCircosSNPTrack('Gene Type', points_chromosomes_ra_f2, seq(3, 57, length.out = 9-2)[1:2], 
+  points_values_ra_f2, colors = c("blue", "blue"), size = 4, minRadius = 1.04, maxRadius = 1.04, shape = 'rect')
+
+#tracklist_f2 = tracklist_f2 + BioCircosTextTrack("testText", 'Subtype F2 hDRG and RA Interactions', weight = "bold", size = '1em', x = -0.6, y = -1.25, displayGenomeBorder = TRUE)
+
+links_chromosomes_1_f2 = c('hDRG', 'hDRG', 'hDRG') # Chromosomes on which the links should start
+links_chromosomes_2_f2 = c('RA', 'RA', 'RA') # Chromosomes on which the links should end
+
+# Coordinates to place start of links. The coordinates below correspond to the sequence given by seq(3, 297, length.out = 46) Their starting coordinate must be repeated for the number of connections between them and the number of RA genes they are connected to. WE HAVE TO TAKE OUT ALL GENES THAT ARE CONNECTED TO LTBP3 AND ITGB5
+links_pos_1_f2 = c(35.67, 42.20, 48.73, 55.27, 61.80, 68.33, 74.87, 81.40, 87.93, 94.47, 107.53, 120.60, 146.73, 153.27, 159.80, 166.33, 172.87, 179.40, 185.93, 192.47, 199.00, 205.53, 212.07, 218.60, 225.13, 231.67, 238.20,  244.73, 251.27, 257.80, 264.33, 270.87, 179.40, 277.40, 283.93, 290.47, 297)
+# Coordinates to place end of links. The coordinates below correspond to the sequence given by seq(3, 57, length.out = 9-2) but we have 9 values in total. Their ending coordinate must be repeated for the number of connections between them and the number of hdrg genes they are connected to. WE SKIP LTBP3 AND ITGB5 HERE AND MANUALLY CREATE THEIR CONNECTIONS LATER!!!
+links_pos_2_f2 = c(3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 12, 3, 21, 30, 30, 30, 30, 30, 30, 30, 39, 39, 39, 39, 39, 39, 39, 39, 39, 39, 39, 48, 48, 48, 48, 57, 57)
+# The labels are given at the end of the link. Therefore, we label the RA scRNA when starting at the hDRG for linking.
+links_labels_12_f2 = c('FGFR1', '', '', '', '', '', '', '', '', '', 'LPAR1', '', "ANGPTL2", "CTGF", '', '', '', '', '', '', 'EFNA5', '', '', '', '', '', '', '', '', '', '', 'TFPI', '', '', '', 'TIMP2', '') 
+
+tracklist_f2 = tracklist_f2 + BioCircosLinkTrack('myLinkTrack', links_chromosomes_1_f2, links_pos_1_f2,
+  links_pos_1_f2, links_chromosomes_2_f2, links_pos_2_f2, links_pos_2_f2,
+  maxRadius = 0.7, width = "0.03em", color = 'cyan', labelSize = "0.8em", labels = links_labels_12_f2)
+
+links_chromosomes_3_f2 = c('RA', 'RA', 'RA') # Chromosomes on which the links should start
+links_chromosomes_4_f2 = c('hDRG', 'hDRG', 'hDRG') # Chromosomes on which the links should end
+
+# Now we start at the RA scRNA
+links_pos_3_f2 = c(3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 12, 3, 21, 30, 30, 30, 30, 30, 30, 30, 39, 39, 39, 39, 39, 39, 39, 39, 39, 39, 39, 48, 48, 48, 48, 57, 57)
+# Now we end at the hDRG
+links_pos_4_f2 = c(35.67, 42.20, 48.73, 55.27, 61.80, 68.33, 74.87, 81.40, 87.93, 94.47, 107.53, 120.60, 146.73, 153.27, 159.80, 166.33, 172.87, 179.40, 185.93, 192.47, 199.00, 205.53, 212.07, 218.60, 225.13, 231.67, 238.20,  244.73, 251.27, 257.80, 264.33, 270.87, 179.40, 277.40, 283.93, 290.47, 297)
+# These links are for the hDRG
+links_labels_34_f2 = c("FGF1", "FGF2", "FGF5", "FGF7", "FGF9", "FGF10", "FGF11", "FGF12", "FGF13", "FGF18", "LIPH", 'NCAM1', 'TIE1', 'ERBB4', 'ITGA5', 'ITGAM', 'ITGB2', 'LRP1', 'LRP6', 'NTRK1', 'EPHA2', 'EPHA3', 'EPHA4', 'EPHA5', 'EPHA6', 'EPHA7', 'EPHA8', 'EPHA10', 'EPHB1', 'EPHB2', 'EPHB6', 'F3', '', 'SDC4', 'VLDLR', 'ITGA3', 'ITGB1')
+
+tracklist_f2 = tracklist_f2 + BioCircosLinkTrack('myLinkTrack', links_chromosomes_3_f2, links_pos_3_f2,
+  links_pos_3_f2, links_chromosomes_4_f2, links_pos_4_f2, links_pos_4_f2,
+  maxRadius = 0.7, width = "0.03em", color = 'cyan', labelSize = "0.8em", labels = links_labels_34_f2, labelPadding = 3)
+
+links_chromosomes_5_f2 = c('hDRG', 'hDRG', 'hDRG') # Chromosomes on which the links should start
+links_chromosomes_6_f2 = c('RA', 'RA', 'RA') # Chromosomes on which the links should end
+links_pos_5_f2 = c(146.73, 153.27, 159.80, 166.33, 172.87, 179.40, 185.93, 192.47, 199.00, 205.53, 212.07, 218.60, 225.13, 231.67, 238.20,  244.73, 251.27, 257.80, 264.33, 270.87, 179.40, 277.40, 283.93, 290.47, 297)
+links_pos_6_f2 = c(21, 30, 30, 30, 30, 30, 30, 30, 39, 39, 39, 39, 39, 39, 39, 39, 39, 39, 39, 48, 48, 48, 48, 57, 57)
+links_labels_56_f2 = c("", "", '', '', '', '', '', '', "", '', '', '', "", '', "")
+
+tracklist_f2 = tracklist_f2 + BioCircosLinkTrack('myLinkTrack', links_chromosomes_5_f2, links_pos_5_f2,
+  links_pos_5_f2, links_chromosomes_6_f2, links_pos_6_f2, links_pos_6_f2,
+  maxRadius = 0.7, width = "0.03em", color = 'brown', labelSize = "0.8em", labels = links_labels_56_f2)
+
+links_chromosomes_7_f2 = c('hDRG') # Chromosomes on which the links should start
+links_chromosomes_8_f2 = c('hDRG') # Chromosomes on which the links should end
+links_pos_7_f2 = c(2)
+links_pos_8_f2 = c(8.5)
+links_labels_78_f2 = c("LTBP3")
+
+tracklist_f2 = tracklist_f2 + BioCircosLinkTrack('myLinkTrack_f2', links_chromosomes_7_f2, links_pos_7_f2,
+  links_pos_7_f2, links_chromosomes_8_f2, links_pos_8_f2, links_pos_8_f2,
+  maxRadius = 0.7, width = "0.03em", color = 'cyan', labelSize = "0.8em", labels = links_labels_78_f2)
+
+links_chromosomes_9_f2 = c('hDRG') # Chromosomes on which the links should start
+links_chromosomes_10_f2 = c('hDRG') # Chromosomes on which the links should end
+links_pos_9_f2 = c(10.5)
+links_pos_10_f2 = c(4)
+links_labels_910_f2 = c("ITGB5")
+
+tracklist_f2 = tracklist_f2 + BioCircosLinkTrack('myLinkTrack_f2', links_chromosomes_9_f2, links_pos_9_f2,
+  links_pos_9_f2, links_chromosomes_10_f2, links_pos_10_f2, links_pos_10_f2,
+  maxRadius = 0.7, width = "0.03em", color = 'brown', labelSize = "0.8em", labels = links_labels_910_f2)
+
+# Create connections for all other gene interactions with LTBP3
+links_chromosomes_11_f2 = c('hDRG') # Chromosomes on which the links should start
+links_chromosomes_12_f2 = c('hDRG') # Chromosomes on which the links should end
+links_pos_11_f2 = c(3, 3, 3, 3, 3, 3, 3, 3)
+links_pos_12_f2 = c(16.07, 22.60, 29.13, 101.00, 114.07, 127.13, 133.67, 140.20)
+links_labels_1112_f2 = c("ADAM9","CYR61","EDIL3","ITGB3BP","LTBP1","PLAU","SERPINE1","SORBS1")
+
+tracklist_f2 = tracklist_f2 + BioCircosLinkTrack('myLinkTrack_f2', links_chromosomes_11_f2, links_pos_11_f2,
+  links_pos_11_f2, links_chromosomes_12_f2, links_pos_12_f2, links_pos_12_f2,
+  maxRadius = 0.7, width = "0.03em", color = 'cyan', labelSize = "0.8em", labels = links_labels_1112_f2)
+
+# Create inside arc for RA scRNA gene identification
+arcs_chromosomes_ra_f2 = c('RA') # Chromosomes on which the arcs should be displayed
+arcs_begin_ra_f2 = c(0)
+arcs_end_ra_f2 = c(75)
+
+tracklist_f2 = tracklist_f2 + BioCircosArcTrack('myArcTrack', arcs_chromosomes_ra_f2, arcs_begin_ra_f2, arcs_end_ra_f2, minRadius = 1.10, maxRadius = 1.15, colors = 'forestgreen') 
+
+# Create inside arc for RA scRNA gene identification
+arcs_chromosomes_hdrg_f2 = c('hDRG') # Chromosomes on which the arcs should be displayed
+arcs_begin_hdrg_f2 = c(0)
+arcs_end_hdrg_f2 = c(300)
+
+tracklist_f2 = tracklist_f2 + BioCircosArcTrack('myArcTrack', arcs_chromosomes_hdrg_f2, arcs_begin_hdrg_f2, arcs_end_hdrg_f2, minRadius = 1.16, maxRadius = 1.21, colors = 'deeppink3')
+
+tracklist_f2 = tracklist_f2 + BioCircosTextTrack('MytextTrack', 'HLA-DRAhi sublining fibroblasts (SC-F2)', x = -0.6, y = -1.25, size = "1em",
+  weight = "bold", opacity = 1, color = "#000000")
+
+tracklist_f2 = tracklist_f2 + BioCircosTextTrack('MytextTrack', 'RA', x = -0.7, y = -1, size = "1em",
+  weight = "bold", opacity = 1, color = "#000000")
+
+tracklist_f2 = tracklist_f2 + BioCircosTextTrack('MytextTrack', 'hDRG', x = 0.55, y = 1.16, size = "1em",
+  weight = "bold", opacity = 1, color = "#000000")
+
+BioCircos(tracklist_f2, genome = myGenome_f2, genomeFillColor = c('white', 'white'), chrPad = 0.05, displayGenomeBorder = FALSE, yChr =  FALSE,
+  genomeTicksDisplay = FALSE,  genomeLabelTextSize = 0, genomeLabelDy = 0, width = 650, height = 650)
+```
+
+Below we create the interaction plot for F3 with the hDRG and RA scRNA results on the outside, and the ligand/receptor information on the inside. I think we can use one circle since all genes are either ligand or receptor, with no overlap as there was for the hDRG and RA scRNA genes. We will fill this whole with another colored track.
+
+```{r, fig.height=10,fig.width=10}
+library(BioCircos)
+
+# Chromosomes on which the hDRG points should be displayed
+points_chromosomes_hdrg_f3 = c('hDRG', 'hDRG')
+# Coordinates on which the hDRG points should be displayed (length.out = 43 because there are 43 unique genes WITH NO REPEATS in the hDRG from the ligand (left column) and receptor data (right column) in f3_data)
+points_coordinates_hdrg_f3 = seq(3, 296, length.out = 43)
+# Values associated with each point, used as radial coordinate 
+# We space them out according to the number of unique ligands in F2 here
+points_values_hdrg_f3 = 1:length(points_chromosomes_hdrg_f3)
+
+# Size of the outside of the circle for hdrg and ra
+# Since there are 44 hdrg and 9 RA genes, we make the slices of the circle 360 - (44/53*360) = 299 for the hdrg and 360 - 299 because there is overlap between the hDRG and RA for LTBP3 
+myGenome_f3 = list("hDRG" = 299,
+        "RA" = 61)
+
+# Create circle for hDRG and RA identification to lie in
+tracklist_f3 = BioCircosBackgroundTrack("myBackgroundTrack", minRadius = 0.99, maxRadius = 1.09,
+  borderColors = "#AAAAAA", borderSize = 0.6, fillColors = "White") 
+
+tracklist_f3 = tracklist_f3 + BioCircosSNPTrack('Gene Type', points_chromosomes_hdrg_f3, seq(3, 296, length.out = 43)[2:32], 
+  points_values_hdrg_f3, colors = c("orange", "orange", "orange", "orange", "orange", "orange", "orange", "orange", "orange", "orange", "orange", "orange", "orange", "orange", "orange", "orange", "orange", "orange", "orange", "orange", "orange", "orange", "orange", "orange", "orange", "orange", "orange", "orange", "orange", "orange"), minRadius = 1.04, maxRadius = 1.04)
+
+tracklist_f3 = tracklist_f3 + BioCircosSNPTrack('Gene Type', points_chromosomes_hdrg_f3, seq(3, 296, length.out = 43)[1], 
+  points_values_hdrg_f3, colors = c("blue"), size = 4, minRadius = 1.04, maxRadius = 1.04, shape = 'rect')
+
+tracklist_f3 = tracklist_f3 + BioCircosSNPTrack('Gene Type', points_chromosomes_hdrg_f3, seq(3, 296, length.out = 43)[33:43], 
+  points_values_hdrg_f3, colors = c("blue", "blue", "blue", "blue", "blue", "blue", "blue", "blue", "blue", "blue", "blue"), size = 4, minRadius = 1.04, maxRadius = 1.04, shape = 'rect')
+
+# Chromosomes on which the RA scRNA points should be displayed
+points_chromosomes_ra_f3 = c('RA', 'RA')
+# Coordinates on which the RA scRNA points should be displayed length.out = 11-2 because there are 9 unique genes in the RA scRNA from the ligand (left column) and receptor data (right column) in f3_data) WE SUBTRACT 2 BECAUSE WE ACCOUNT FOR LTBP3 AND ITGB5 IN THE HDRG VALUES
+points_coordinates_ra_f3 = seq(3, 58, length.out = 11-2)
+# Values associated with each point, used as radial coordinate 
+# We space them out according to the number of unique RA scRNA genes in F3 here
+points_values_ra_f3 = 1:length(points_chromosomes_ra_f3)
+
+#tracklist_f3 = tracklist_f3 + BioCircosSNPTrack('Gene Type', points_chromosomes_ra_f3, points_coordinates_ra_f3, 
+#  points_values_ra_f3, colors = c("blue", "blue", "blue", "blue", "blue", "orange", #"orange", "orange", "orange"), minRadius = 1.04, maxRadius = 1.04)
+
+tracklist_f3 = tracklist_f3 + BioCircosSNPTrack('Gene Type', points_chromosomes_ra_f3, seq(3, 58, length.out = 11-2)[6:9], 
+  points_values_ra_f3, colors = c("orange", "orange", "orange", "orange"), minRadius = 1.04, maxRadius = 1.04)
+
+tracklist_f3 = tracklist_f3 + BioCircosSNPTrack('Gene Type', points_chromosomes_ra_f3, seq(3, 58, length.out = 11-2)[1:5], 
+  points_values_ra_f3, colors = c("blue", "blue", "blue", "blue", "blue"), size = 4, minRadius = 1.04, maxRadius = 1.04, shape = 'rect')
+
+#tracklist_f3 = tracklist_f3 + BioCircosTextTrack("testText", 'Subtype F3 hDRG and RA Interactions', weight = "bold", size = '1em', x = -0.6, y = -1.25, displayGenomeBorder = TRUE)
+
+links_chromosomes_1_f3 = c('hDRG', 'hDRG', 'hDRG') # Chromosomes on which the links should start
+links_chromosomes_2_f3 = c('RA', 'RA', 'RA') # Chromosomes on which the links should end
+
+# Coordinates to place start of links. The coordinates below correspond to the sequence given by seq(3, 296, length.out = 43) Their starting coordinate must be repeated for the number of connections between them and the number of RA genes they are connected to. WE HAVE TO TAKE OUT ALL GENES THAT ARE CONNECTED TO LTBP3 AND ITGB5
+links_pos_1_f3 = c(30.90, 44.86, 51.83, 58.81, 65.79, 72.76, 79.74, 86.71, 93.69, 100.67, 107.64, 114.62, 128.57, 135.55, 142.52, 156.48, 163.45, 184.38, 198.33, 205.31, 212.29, 219.26, 226.24, 233.21, 240.19,
+247.17, 254.14, 261.12, 268.10, 275.07, 282.05, 289.02, 296)
+#links_pos_1_f3 = c(31.59, 38.73, 45.88, 53.02, 60.17, 67.32, 74.46, 81.61, 88.76, 95.90, 103.05, 110.20, 117.34, 131.63, 138.78, 145.93, 160.22, 167.37, 188.80, 203.10, 210.24, 217.39, 224.54, 231.68, 238.83, 245.98,
+#253.12, 260.27, 267.41, 274.56, 281.71, 288.85, 296)
+# Coordinates to place end of links. The coordinates below correspond to the sequence given by seq(3, 57, length.out = 9-2) but we have 9 values in total. Their ending coordinate must be repeated for the number of connections between them and the number of hdrg genes they are connected to. WE SKIP LTBP3 AND ITGB5 HERE AND MANUALLY CREATE THEIR CONNECTIONS LATER!!!
+links_pos_2_f3 = c(3,  9.88, 9.88, 9.88, 9.88, 9.88, 9.88, 9.88, 9.88, 9.88, 9.88, 16.75, 16.75, 23.63, 30.50, 30.50, 9.88, 3, 3, 16.75, 16.75, 16.75, 37.38, 44.25, 44.25, 44.25, 44.25, 44.25, 44.25, 44.25, 51.13, 51.13, 58)
+# The labels are given at the end of the link. Therefore, we label the RA scRNA when starting at the hDRG for linking.
+links_labels_12_f3 = c('CDON', 'FGFR1', '', '', '', '', '', '', '', '', '', 'TGFBR3', '', 'LPAR1', 'PTPRD', '', '', '', '', '', '', '', "ANGPTL2", "CTGF", '', '', '', '', '', '', 'TIMP2', '', 'TIMP3') 
+
+tracklist_f3 = tracklist_f3 + BioCircosLinkTrack('myLinkTrack', links_chromosomes_1_f3, links_pos_1_f3,
+  links_pos_1_f3, links_chromosomes_2_f3, links_pos_2_f3, links_pos_2_f3,
+  maxRadius = 0.7, width = "0.03em", color = 'cyan', labelSize = "0.8em", labels = links_labels_12_f3)
+
+links_chromosomes_3_f3 = c('RA', 'RA', 'RA') # Chromosomes on which the links should start
+links_chromosomes_4_f3 = c('hDRG', 'hDRG', 'hDRG') # Chromosomes on which the links should end
+
+# Now we start at the RA scRNA
+links_pos_3_f3 = c(3, 9.88, 9.88, 9.88, 9.88, 9.88, 9.88, 9.88, 9.88, 9.88, 9.88, 16.75, 16.75, 23.63, 30.50, 30.50, 9.88, 3, 3, 16.75, 16.75, 16.75, 37.38, 44.25, 44.25, 44.25, 44.25, 44.25, 44.25, 44.25, 51.13, 51.13, 58)
+# Now we end at the hDRG
+links_pos_4_f3 = c(30.90, 44.86, 51.83, 58.81, 65.79, 72.76, 79.74, 86.71, 93.69, 100.67, 107.64, 114.62, 128.57, 135.55, 142.52, 156.48, 163.45, 184.38, 198.33, 205.31, 212.29, 219.26, 226.24, 233.21, 240.19,
+247.17, 254.14, 261.12, 268.10, 275.07, 282.05, 289.02, 296)
+# These links are for the hDRG
+links_labels_34_f3 = c("DHH", "FGF1", "FGF2", "FGF5", "FGF7", "FGF9", "FGF10", "FGF11", "FGF12", "FGF13", "FGF18", "INHA", "INHBA", "LIPH", "LRFN4", "LRRC4B", 'NCAM1', "NTN3", "SHH", "TGFB1", 'TGFB2', 'TGFB3', 'TIE1', 'ERBB4', 'ITGA5', 'ITGAM', 'ITGB2', 'LRP1', 'LRP6', 'NTRK1', 'ITGA3', 'ITGB1', 'KDR')
+
+tracklist_f3 = tracklist_f3 + BioCircosLinkTrack('myLinkTrack', links_chromosomes_3_f3, links_pos_3_f3,
+  links_pos_3_f3, links_chromosomes_4_f3, links_pos_4_f3, links_pos_4_f3,
+  maxRadius = 0.7, width = "0.03em", color = 'cyan', labelSize = "0.8em", labels = links_labels_34_f3, labelPadding = 3)
+
+links_chromosomes_5_f3 = c('hDRG', 'hDRG', 'hDRG') # Chromosomes on which the links should start
+links_chromosomes_6_f3 = c('RA', 'RA', 'RA') # Chromosomes on which the links should end
+links_pos_5_f3 = c(226.24, 233.21, 240.19,
+247.17, 254.14, 261.12, 268.10, 275.07, 282.05, 289.02, 296)
+links_pos_6_f3 = c(37.38, 44.25, 44.25, 44.25, 44.25, 44.25, 44.25, 44.25, 51.13, 51.13, 58)
+links_labels_56_f3 = c("", "", '', '', '', '', '', '', "", '', '')
+
+tracklist_f3 = tracklist_f3 + BioCircosLinkTrack('myLinkTrack', links_chromosomes_5_f3, links_pos_5_f3,
+  links_pos_5_f3, links_chromosomes_6_f3, links_pos_6_f3, links_pos_6_f3,
+  maxRadius = 0.7, width = "0.03em", color = 'brown', labelSize = "0.8em", labels = links_labels_56_f3)
+
+links_chromosomes_7_f3 = c('hDRG') # Chromosomes on which the links should start
+links_chromosomes_8_f3 = c('hDRG') # Chromosomes on which the links should end
+links_pos_7_f3 = c(2)
+links_pos_8_f3 = c(8.7)
+links_labels_78_f3 = c("LTBP3")
+
+tracklist_f3 = tracklist_f3 + BioCircosLinkTrack('myLinkTrack_f3', links_chromosomes_7_f3, links_pos_7_f3,
+  links_pos_7_f3, links_chromosomes_8_f3, links_pos_8_f3, links_pos_8_f3,
+  maxRadius = 0.7, width = "0.03em", color = 'cyan', labelSize = "0.8em", labels = links_labels_78_f3)
+
+links_chromosomes_9_f3 = c('hDRG') # Chromosomes on which the links should start
+links_chromosomes_10_f3 = c('hDRG') # Chromosomes on which the links should end
+links_pos_9_f3 = c(10.7)
+links_pos_10_f3 = c(4)
+links_labels_910_f3 = c("ITGB5")
+
+tracklist_f3 = tracklist_f3 + BioCircosLinkTrack('myLinkTrack_f3', links_chromosomes_9_f3, links_pos_9_f3,
+  links_pos_9_f3, links_chromosomes_10_f3, links_pos_10_f3, links_pos_10_f3,
+  maxRadius = 0.7, width = "0.03em", color = 'brown', labelSize = "0.8em", labels = links_labels_910_f3)
+
+# Create connections for all other gene interactions with LTBP3
+links_chromosomes_11_f3 = c('hDRG') # Chromosomes on which the links should start
+links_chromosomes_12_f3 = c('hDRG') # Chromosomes on which the links should end
+links_pos_11_f3 = c(3, 3, 3, 3, 3, 3, 3, 3)
+links_pos_12_f3 = c(16.95, 23.93, 37.88, 121.60, 149.50, 170.43, 177.40, 191.36)
+links_labels_1112_f3 = c("ADAM9","CYR61","EDIL3","ITGB3BP","LTBP1","PLAU","SERPINE1","SORBS1")
+
+tracklist_f3 = tracklist_f3 + BioCircosLinkTrack('myLinkTrack_f3', links_chromosomes_11_f3, links_pos_11_f3,
+  links_pos_11_f3, links_chromosomes_12_f3, links_pos_12_f3, links_pos_12_f3,
+  maxRadius = 0.7, width = "0.03em", color = 'cyan', labelSize = "0.8em", labels = links_labels_1112_f3)
+
+# Create inside arc for RA scRNA gene identification
+arcs_chromosomes_ra_f3 = c('RA') # Chromosomes on which the arcs should be displayed
+arcs_begin_ra_f3 = c(0)
+arcs_end_ra_f3 = c(76)
+
+tracklist_f3 = tracklist_f3 + BioCircosArcTrack('myArcTrack', arcs_chromosomes_ra_f3, arcs_begin_ra_f3, arcs_end_ra_f3, minRadius = 1.10, maxRadius = 1.15, colors = 'forestgreen') 
+
+# Create inside arc for RA scRNA gene identification
+arcs_chromosomes_hdrg_f3 = c('hDRG') # Chromosomes on which the arcs should be displayed
+arcs_begin_hdrg_f3 = c(0)
+arcs_end_hdrg_f3 = c(299)
+
+tracklist_f3 = tracklist_f3 + BioCircosArcTrack('myArcTrack', arcs_chromosomes_hdrg_f3, arcs_begin_hdrg_f3, arcs_end_hdrg_f3, minRadius = 1.16, maxRadius = 1.21, colors = 'deeppink3')
+
+tracklist_f3 = tracklist_f3 + BioCircosTextTrack('MytextTrack', 'DKK3+ sublining fibroblasts (SC-F3)', x = -0.6, y = -1.25, size = "1em",
+  weight = "bold", opacity = 1, color = "#000000")
+
+tracklist_f3 = tracklist_f3 + BioCircosTextTrack('MytextTrack', 'RA', x = -0.7, y = -1, size = "1em",
+  weight = "bold", opacity = 1, color = "#000000")
+
+tracklist_f3 = tracklist_f3 + BioCircosTextTrack('MytextTrack', 'hDRG', x = 0.55, y = 1.16, size = "1em",
+  weight = "bold", opacity = 1, color = "#000000")
+
+BioCircos(tracklist_f3, genome = myGenome_f3, genomeFillColor = c('white', 'white'), chrPad = 0.05, displayGenomeBorder = FALSE, yChr =  FALSE,
+  genomeTicksDisplay = FALSE,  genomeLabelTextSize = 0, genomeLabelDy = 0, width = 650, height = 650)
+```
+
+Below we create the interaction plot for F4 with the hDRG and RA scRNA results on the outside, and the ligand/receptor information on the inside. I think we can use one circle since all genes are either ligand or receptor, with no overlap as there was for the hDRG and RA scRNA genes. We will fill this whole with another colored track.
+
+```{r, fig.height=10,fig.width=10}
+library(BioCircos)
+
+# Chromosomes on which the hDRG points should be displayed
+points_chromosomes_hdrg_f4 = c('hDRG', 'hDRG')
+# Coordinates on which the hDRG points should be displayed (length.out = 82 because there are 82 unique genes WITH NO REPEATS in the hDRG from the ligand (left column) and receptor data (right column) in f4_data)
+points_coordinates_hdrg_f4 = seq(2, 291, length.out = 82)
+# Values associated with each point, used as radial coordinate 
+# We space them out according to the number of unique ligands in F4 here
+points_values_hdrg_f4 = 1:length(points_chromosomes_hdrg_f4)
+
+# Size of the outside of the circle for hdrg and ra
+# Since there are 83 hdrg and 19 RA gene spots, we make the slices of the circle 360 - (83/102*360) = 293 for the hdrg and 360 - 293 because there is overlap between the hDRG and RA for LTBP3 
+myGenome_f4 = list("hDRG" = 293,
+        "RA" = 67)
+
+# Create circle for hDRG and RA identification to lie in
+tracklist_f4 = BioCircosBackgroundTrack("myBackgroundTrack", minRadius = 1.00, maxRadius = 1.09,
+  borderColors = "#AAAAAA", borderSize = 0.6, fillColors = "White") 
+
+# Identify ligands in hDRG
+tracklist_f4 = tracklist_f4 + BioCircosSNPTrack('Gene Type', points_chromosomes_hdrg_f4, points_coordinates_hdrg_f4, 
+  points_values_hdrg_f4, colors = c("white", "orange", "orange", "orange", "orange", "orange", "orange", "orange", "orange", "orange", "orange", "orange", "orange", "orange", "orange", "orange", "orange", "orange", "orange", "orange", "orange", "orange", "orange", "orange", "orange", "orange", "orange", "orange", "orange", "orange", "orange", "orange", "orange", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white"), minRadius = 1.03, maxRadius = 1.03)
+
+# Identify receptors in hDRG
+tracklist_f4 = tracklist_f4 + BioCircosSNPTrack('Gene Type f4 blue', points_chromosomes_hdrg_f4, points_coordinates_hdrg_f4, 
+  points_values_hdrg_f4, colors = c("blue", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "blue", "blue", "blue", "blue", "blue", "blue", "blue", "blue", "blue", "blue", "blue", "blue", "blue", "blue", "blue", "blue", "blue", "blue", "blue", "blue", "blue", "blue", "blue", "blue", "blue", "blue", "blue", "blue", "blue", "blue", "blue", "blue", "blue", "blue", "blue", "blue", "blue", "blue", "blue", "blue", "blue", "blue", "blue", "blue", "blue", "blue", "blue",  "blue", "blue", "blue"), minRadius = 1.06, maxRadius = 1.06, shape = 'rect', size = 4)
+
+# Chromosomes on which the RA scRNA points should be displayed
+points_chromosomes_ra_f4 = c('RA', 'RA')
+# Coordinates on which the RA scRNA points should be displayed length.out = 11-2 because there are 21 unique genes in the RA scRNA from the ligand (left column) and receptor data (right column) in f4_data) WE SUBTRACT 2 BECAUSE WE ACCOUNT FOR LTBP3 AND ITGB5 IN THE HDRG VALUES
+points_coordinates_ra_f4 = seq(2, 65, length.out = 21-2)
+# Values associated with each point, used as radial coordinate 
+# We space them out according to the number of unique RA scRNA genes in F4 here
+points_values_ra_f4 = 1:length(points_chromosomes_ra_f4)
+
+# Identify receptors in RA
+tracklist_f4 = tracklist_f4 + BioCircosSNPTrack('Gene Type f4 blue', points_chromosomes_ra_f4, points_coordinates_ra_f4, 
+  points_values_ra_f4, colors = c("blue", "blue", "blue", "blue", "blue", "blue", "blue", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white"), minRadius = 1.07, maxRadius = 1.07, shape = 'rect', size = 4)
+
+# Identify ligands in RA
+tracklist_f4 = tracklist_f4 + BioCircosSNPTrack('Gene Type f4 orange', points_chromosomes_ra_f4, points_coordinates_ra_f4, 
+  points_values_ra_f4, colors = c("orange", "white", "white", "white", "white", "white", "white", "orange", "orange", "orange", "orange", "orange", "orange", "orange", "orange", "orange", "orange", "orange", "orange"), minRadius = 1.03, maxRadius = 1.03)
+
+#tracklist_f4 = tracklist_f4 + BioCircosTextTrack("testText", 'Subtype F4 hDRG and RA Interactions', weight = "bold", size = '1em', x = -0.6, y = -1.25, displayGenomeBorder = TRUE)
+
+links_chromosomes_1_f4 = c('hDRG', 'hDRG', 'hDRG') # Chromosomes on which the links should start
+links_chromosomes_2_f4 = c('RA', 'RA', 'RA') # Chromosomes on which the links should end
+
+# Coordinates to place start of links. The coordinates below correspond to the sequence given by seq(2, 291, length.out = 82) Their starting coordinate must be repeated for the number of connections between them and the number of RA genes they are connected to. WE HAVE TO TAKE OUT ALL GENES THAT ARE CONNECTED TO LTBP3 AND ITGB5
+links_pos_1_f4 = c(12.70, 16.27, 19.84, 26.98, 34.11, 37.68, 41.25, 44.81, 48.38, 51.95, 55.52, 59.09, 62.65, 66.22, 69.79, 73.36, 80.49, 84.06, 91.20, 94.77, 98.33, 105.47, 112.60, 119.74, 123.31, 126.88, 130.44, 134.01, 137.58, 141.15, 144.72, 148.28, 151.85, 155.42, 158.99, 162.56, 166.12, 166.12, 169.69, 173.26, 176.83, 137.58, 180.40, 183.96, 187.53, 191.10, 194.67, 198.23, 201.80, 205.37, 208.94, 212.51, 216.07, 219.64, 223.21, 226.78, 230.35, 233.91, 155.42, 158.99, 166.12, 237.48, 241.05, 244.62, 248.19, 251.75, 255.32, 258.89, 262.46, 266.02, 269.59, 273.16, 276.73, 137.58, 280.30, 283.86, 287.43, 291, 262.46)
+
+# Coordinates to place end of links. The coordinates below correspond to the sequence given by seq(2, 65, length.out = 21-2) but we have 21 values in total. Their ending coordinate must be repeated for the number of connections between them and the number of hdrg genes they are connected to. WE SKIP LTBP3 AND ITGB5 HERE AND MANUALLY CREATE THEIR CONNECTIONS LATER!!!
+links_pos_2_f4 = c(2, 2, 5.5, 9, 12.5, 12.5, 12.5, 12.5, 12.5, 12.5, 12.5, 12.5, 12.5, 12.5, 16, 19.5, 19.5, 19.5, 12.5, 23, 9, 19.5, 9, 26.5, 2, 2, 2, 2, 2, 2, 2, 2, 2, 30, 30, 30, 30, 33.5, 33.5, 33.5, 33.5, 33.5, 33.5, 33.5, 37, 37, 37, 37, 37, 37, 37, 37, 37, 37, 37, 40.5, 40.5, 40.5, 40.5, 40.5, 40.5, 40.5, 44, 44, 47.5, 47.5, 51, 51, 54.5, 54.5, 54.5, 54.5, 58, 58, 58, 58, 61.5, 61.5, 65)
+# The labels are given at the end of the link. Therefore, we label the RA scRNA when starting at the hDRG for linking.
+links_labels_12_f4 = c('APP', '', 'ACKR3', 'CDON', 'FGFR1', '', '', '', '', '', '', '', '', '', 'HRH1', 'PTPRS', '', '', '', 'ANK3', '', '', '', "ANGPTL2", '', '', '', '', '', '', '', '', '', 'BTC', '', '', '', "CTGF", '', '', '', '', '', '', 'EFNA5', '', '', '', '', '', '', '', '', '', '', 'HBEGF', '', '', '', '', '', '', 'NTN4', '', 'SEMA3E', '', 'SEMA5A', '', 'SEMA6D', '', '', '', 'TFPI', '', '', '', 'TIMP2', '', 'TIMP3') 
+
+tracklist_f4 = tracklist_f4 + BioCircosLinkTrack('myLinkTrack', links_chromosomes_1_f4, links_pos_1_f4,
+  links_pos_1_f4, links_chromosomes_2_f4, links_pos_2_f4, links_pos_2_f4,
+  maxRadius = 0.7, width = "0.03em", color = 'cyan', labelSize = "0.75em", labels = links_labels_12_f4)
+
+links_chromosomes_3_f4 = c('RA', 'RA', 'RA') # Chromosomes on which the links should start
+links_chromosomes_4_f4 = c('hDRG', 'hDRG', 'hDRG') # Chromosomes on which the links should end
+
+# Now we start at the RA scRNA
+links_pos_3_f4 = c(2, 2, 5.5, 9, 12.5, 12.5, 12.5, 12.5, 12.5, 12.5, 12.5, 12.5, 12.5, 12.5, 16, 19.5, 19.5, 19.5, 12.5, 23, 9, 19.5, 9, 26.5, 2, 2, 2, 2, 2, 2, 2, 2, 2, 30, 30, 30, 30, 33.5, 33.5, 33.5, 33.5, 33.5, 33.5, 33.5, 37, 37, 37, 37, 37, 37, 37, 37, 37, 37, 37, 40.5, 40.5, 40.5, 40.5, 40.5, 40.5, 40.5, 44, 44, 47.5, 47.5, 51, 51, 54.5, 54.5, 54.5, 54.5, 58, 58, 58, 58, 61.5, 61.5, 65)
+# Now we end at the hDRG
+links_pos_4_f4 = c(12.70, 16.27, 19.84, 26.98, 34.11, 37.68, 41.25, 44.81, 48.38, 51.95, 55.52, 59.09, 62.65, 66.22, 69.79, 73.36, 80.49, 84.06, 91.20, 94.77, 98.33, 105.47, 112.60, 119.74, 123.31, 126.88, 130.44, 134.01, 137.58, 141.15, 144.72, 148.28, 151.85, 155.42, 158.99, 162.56, 166.12, 166.12, 169.69, 173.26, 176.83, 137.58, 180.40, 183.96, 187.53, 191.10, 194.67, 198.23, 201.80, 205.37, 208.94, 212.51, 216.07, 219.64, 223.21, 226.78, 230.35, 233.91, 155.42, 158.99, 166.12, 237.48, 241.05, 244.62, 248.19, 251.75, 255.32, 258.89, 262.46, 266.02, 269.59, 273.16, 276.73, 137.58, 280.30, 283.86, 287.43, 291, 262.46)
+# These links are for the hDRG
+links_labels_34_f4 = c("CLSTN1", "CLSTN3", "CXCL12", "DHH", "FGF1", "FGF2", "FGF5", "FGF7", "FGF9", "FGF10", "FGF11", "FGF12", "FGF13", "FGF18", "HDC", "HSPG2", 'LRFN4', 'LRRC4B', 'NCAM1', 'NFASC', 'NTN3', 'PTN', 'SHH', 'TIE1', 'CAV1', 'CD74', 'FPR2', 'GPC1', 'LRP1', 'NCSTN', 'NGFR', 'SLC45A3', 'TNFRSF21', 'EGFR', 'ERBB2', 'ERBB3', 'ERBB4', '', 'ITGA5', 'ITGAM', 'ITGB2', '', 'LRP6', 'NTRK1', 'EPHA2', 'EPHA3', 'EPHA4', 'EPHA5', 'EPHA6', 'EPHA7', 'EPHA8', 'EPHA10', 'EPHB1', 'EPHB2', 'EPHB6', 'CD44', 'CD82', 'CD9', '', '', '', 'PRLR', 'DCC', 'UNC5A', 'NRP1', 'PLXND1', 'MET', 'PLXNB3', 'KDR', 'PLXNA1', 'TREM2', 'TYROBP', 'F3', '', 'SDC4', 'VLDLR', 'ITGA3', 'ITGB1', '')
+
+tracklist_f4 = tracklist_f4 + BioCircosLinkTrack('myLinkTrack', links_chromosomes_3_f4, links_pos_3_f4,
+  links_pos_3_f4, links_chromosomes_4_f4, links_pos_4_f4, links_pos_4_f4,
+  maxRadius = 0.7, width = "0.03em", color = 'cyan', labelSize = "0.75em", labels = links_labels_34_f4, labelPadding = 3)
+
+links_chromosomes_5_f4 = c('hDRG', 'hDRG', 'hDRG') # Chromosomes on which the links should start
+links_chromosomes_6_f4 = c('RA', 'RA', 'RA') # Chromosomes on which the links should end
+links_pos_5_f4 = c(119.74, 123.31, 126.88, 130.44, 134.01, 137.58, 141.15, 144.72, 148.28, 151.85, 155.42, 158.99, 162.56, 166.12, 166.12, 169.69, 173.26, 176.83, 137.58, 180.40, 183.96, 187.53, 191.10, 194.67, 198.23, 201.80, 205.37, 208.94, 212.51, 216.07, 219.64, 223.21, 226.78, 230.35, 233.91, 155.42, 158.99, 166.12, 237.48, 241.05, 244.62, 248.19, 251.75, 255.32, 258.89, 262.46, 266.02, 269.59, 273.16, 276.73, 137.58, 280.30, 283.86, 287.43, 291, 262.46)
+links_pos_6_f4 = c(26.5, 2, 2, 2, 2, 2, 2, 2, 2, 2, 30, 30, 30, 30, 33.5, 33.5, 33.5, 33.5, 33.5, 33.5, 33.5, 37, 37, 37, 37, 37, 37, 37, 37, 37, 37, 37, 40.5, 40.5, 40.5, 40.5, 40.5, 40.5, 40.5, 44, 44, 47.5, 47.5, 51, 51, 54.5, 54.5, 54.5, 54.5, 58, 58, 58, 58, 61.5, 61.5, 65)
+links_labels_56_f4 = c("", "", '', '', '', '', '', '', "", '', '', "", "", '', '', '', '', '', '', "", '', '', "", "", '', '', '', '', '', '', "", '', '', "", "", '', '', '', '', '', '', "", '', '', "", "", '', '', '', '', '', '', "", '', '', '')
+
+tracklist_f4 = tracklist_f4 + BioCircosLinkTrack('myLinkTrack', links_chromosomes_5_f4, links_pos_5_f4,
+  links_pos_5_f4, links_chromosomes_6_f4, links_pos_6_f4, links_pos_6_f4,
+  maxRadius = 0.7, width = "0.03em", color = 'brown', labelSize = "0.75em", labels = links_labels_56_f4)
+
+links_chromosomes_7_f4 = c('hDRG') # Chromosomes on which the links should start
+links_chromosomes_8_f4 = c('hDRG') # Chromosomes on which the links should end
+links_pos_7_f4 = c(1.5)
+links_pos_8_f4 = c(5.27)
+links_labels_78_f4 = c("LTBP3")
+
+tracklist_f4 = tracklist_f4 + BioCircosLinkTrack('myLinkTrack_f4', links_chromosomes_7_f4, links_pos_7_f4,
+  links_pos_7_f4, links_chromosomes_8_f4, links_pos_8_f4, links_pos_8_f4,
+  maxRadius = 0.7, width = "0.03em", color = 'cyan', labelSize = "0.75em", labels = links_labels_78_f4)
+
+links_chromosomes_9_f4 = c('hDRG') # Chromosomes on which the links should start
+links_chromosomes_10_f4 = c('hDRG') # Chromosomes on which the links should end
+links_pos_9_f4 = c(6.62)
+links_pos_10_f4 = c(2.25)
+links_labels_910_f4 = c("ITGB5")
+
+tracklist_f4 = tracklist_f4 + BioCircosLinkTrack('myLinkTrack_f4', links_chromosomes_9_f4, links_pos_9_f4,
+  links_pos_9_f4, links_chromosomes_10_f4, links_pos_10_f4, links_pos_10_f4,
+  maxRadius = 0.7, width = "0.03em", color = 'brown', labelSize = "0.75em", labels = links_labels_910_f4)
+
+# Create connections for all other gene interactions with ITGB5
+links_chromosomes_11_f4 = c('hDRG') # Chromosomes on which the links should start
+links_chromosomes_12_f4 = c('hDRG') # Chromosomes on which the links should end
+links_pos_11_f4 = c(2, 2, 2, 2, 2, 2, 2, 2)
+links_pos_12_f4 = c(9.14, 23.41, 30.54, 76.93, 87.62, 101.90, 109.04, 116.17)
+links_labels_1112_f4 = c("ADAM9","CYR61","EDIL3","ITGB3BP","LTBP1","PLAU","SERPINE1","SORBS1")
+
+tracklist_f4 = tracklist_f4 + BioCircosLinkTrack('myLinkTrack_f4', links_chromosomes_11_f4, links_pos_11_f4,
+  links_pos_11_f4, links_chromosomes_12_f4, links_pos_12_f4, links_pos_12_f4,
+  maxRadius = 0.7, width = "0.03em", color = 'cyan', labelSize = "0.75em", labels = links_labels_1112_f4)
+
+# Create inside arc for RA scRNA gene identification
+arcs_chromosomes_ra_f4 = c('RA') # Chromosomes on which the arcs should be displayed
+arcs_begin_ra_f4 = c(0)
+arcs_end_ra_f4 = c(77)
+
+tracklist_f4 = tracklist_f4 + BioCircosArcTrack('myArcTrack', arcs_chromosomes_ra_f4, arcs_begin_ra_f4, arcs_end_ra_f4, minRadius = 1.10, maxRadius = 1.15, colors = 'forestgreen') 
+
+# Create inside arc for RA scRNA gene identification
+arcs_chromosomes_hdrg_f4 = c('hDRG') # Chromosomes on which the arcs should be displayed
+arcs_begin_hdrg_f4 = c(0)
+arcs_end_hdrg_f4 = c(293)
+
+tracklist_f4 = tracklist_f4 + BioCircosArcTrack('myArcTrack', arcs_chromosomes_hdrg_f4, arcs_begin_hdrg_f4, arcs_end_hdrg_f4, minRadius = 1.16, maxRadius = 1.21, colors = 'deeppink3')
+
+tracklist_f4 = tracklist_f4 + BioCircosTextTrack('MytextTrack', 'CD55+ lining fibroblasts (SC-F4)', x = -0.6, y = -1.25, size = "1em",
+  weight = "bold", opacity = 1, color = "#000000")
+
+tracklist_f4 = tracklist_f4 + BioCircosTextTrack('MytextTrack', 'RA', x = -0.7, y = -1, size = "1em",
+  weight = "bold", opacity = 1, color = "#000000")
+
+tracklist_f4 = tracklist_f4 + BioCircosTextTrack('MytextTrack', 'hDRG', x = 0.55, y = 1.16, size = "1em",
+  weight = "bold", opacity = 1, color = "#000000")
+
+# Make specific pain genes bold for RA
+links_chromosomes_13 = c('hDRG', 'hDRG', 'hDRG') # Chromosomes on which the links should start
+links_chromosomes_14 = c('RA', 'RA', 'RA') # Chromosomes on which the links should end
+links_pos_13 = c(158.99, 158.99, 158.99, 158.99, 158.99, 158.99, 158.99, 158.99, 158.99, 158.99, 162.56, 162.56, 162.56, 162.56, 162.56, 162.56, 162.56, 162.56, 162.56, 162.56, 226.78, 226.78, 226.78, 226.78, 226.78, 226.78, 226.78, 226.78, 226.78, 226.78, 244.62, 244.62, 244.62, 244.62, 244.62, 244.62, 244.62, 244.62, 244.62, 244.62)
+links_pos_14 = c(30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 33.5, 33.5, 33.5, 33.5, 33.5, 33.5, 33.5, 33.5, 33.5, 33.5, 40.5, 40.5, 40.5, 40.5, 40.5, 40.5, 40.5, 40.5, 40.5, 40.5, 44, 44, 44, 44, 44, 44, 44, 44, 44, 44) 
+links_labels_1314 = c("BTC", "BTC", "BTC", "BTC", "BTC", "BTC", "BTC", "BTC", "BTC", "BTC", "CTGF", "CTGF", "CTGF", "CTGF", "CTGF", "CTGF", "CTGF", "CTGF", "CTGF", "CTGF", "HBEGF", "HBEGF", "HBEGF", "HBEGF", "HBEGF", "HBEGF", "HBEGF", "HBEGF", "HBEGF", "HBEGF", "NTN4", "NTN4", "NTN4", "NTN4", "NTN4", "NTN4", "NTN4", "NTN4", "NTN4", "NTN4")
+
+tracklist_f4 = tracklist_f4 + BioCircosLinkTrack('myLinkTrack', links_chromosomes_13, links_pos_13,
+  links_pos_13, links_chromosomes_14, links_pos_14, links_pos_14,
+  maxRadius = 0.7, width = "0.003em", color = 'brown', labelSize = "0.75em", labels = links_labels_1314)
+
+# Make specific pain genes bold for hDRG
+links_chromosomes_15 = c('RA', 'RA', 'RA') # Chromosomes on which the links should start
+links_chromosomes_16 = c('hDRG', 'hDRG', 'hDRG') # Chromosomes on which the links should end
+links_pos_15 = c(30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 44, 44, 44, 44, 44, 44, 44, 44, 44, 44)
+links_pos_16 = c(155.42, 155.42, 155.42, 155.42, 155.42, 155.42, 155.42, 155.42, 155.42, 155.42, 158.99, 158.99, 158.99, 158.99, 158.99, 158.99, 158.99, 158.99, 158.99, 158.99, 162.56, 162.56, 162.56, 162.56, 162.56, 162.56, 162.56, 162.56, 162.56, 162.56, 166.12, 166.12, 166.12, 166.12, 166.12, 166.12, 166.12, 166.12, 166.12, 166.12, 244.62, 244.62, 244.62, 244.62, 244.62, 244.62, 244.62, 244.62, 244.62, 244.62)
+links_labels_1516 = c("EGFR", "EGFR" , "EGFR" , "EGFR" , "EGFR" , "EGFR" , "EGFR" , "EGFR" , "EGFR" , "EGFR", "ERBB2", "ERBB2", "ERBB2", "ERBB2", "ERBB2", "ERBB2", "ERBB2", "ERBB2", "ERBB2", "ERBB2", "ERBB3", "ERBB3", "ERBB3", "ERBB3", "ERBB3", "ERBB3", "ERBB3", "ERBB3", "ERBB3", "ERBB3", "ERBB4", "ERBB4", "ERBB4", "ERBB4", "ERBB4", "ERBB4", "ERBB4", "ERBB4", "ERBB4", "ERBB4", "UNC5A", "UNC5A", "UNC5A", "UNC5A", "UNC5A", "UNC5A", "UNC5A", "UNC5A", "UNC5A", "UNC5A")
+
+tracklist_f4 = tracklist_f4 + BioCircosLinkTrack('myLinkTrack', links_chromosomes_15, links_pos_15,
+  links_pos_15, links_chromosomes_16, links_pos_16, links_pos_16,
+  maxRadius = 0.7, width = "0.003em", color = 'brown', labelSize = "0.75em", labels = links_labels_1516)
+
+# Make connection for NTN4 wider
+links_chromosomes_17_f4 = c('hDRG') # Chromosomes on which the links should start
+links_chromosomes_18_f4 = c('RA') # Chromosomes on which the links should end
+links_pos_17_f4 = c(244.62)
+links_pos_18_f4 = c(44)
+links_labels_1718_f4 = c("")
+
+tracklist_f4 = tracklist_f4 + BioCircosLinkTrack('myLinkTrack', links_chromosomes_17_f4, links_pos_17_f4,
+  links_pos_17_f4, links_chromosomes_18_f4, links_pos_18_f4, links_pos_18_f4,
+  maxRadius = 0.7, width = "0.15em", color = 'brown', labelSize = "0.5em", labels = links_labels_1718_f4)
+
+
+BioCircos(tracklist_f4, genome = myGenome_f4, genomeFillColor = c('white', 'white'), chrPad = 0.05, displayGenomeBorder = FALSE, yChr =  FALSE,
+  genomeTicksDisplay = FALSE,  genomeLabelTextSize = 0, genomeLabelDy = 0, width = 650, height = 650)
+```
+
+Below we plot the legend.
+
+```{r}
+plot(NULL ,xaxt='n',yaxt='n',bty='n',ylab='',xlab='', xlim=0:1, ylim=0:1)
+legend("left", legend =c('Ligand', 'Receptor'), pch=16, pt.cex=3, cex=1.5, bty='n',
+    col = c('orange', 'blue'))
+
+legend("topleft", legend =c('hDRG Genes', 'RA scRNA Genes'), lty=1, lwd=2, cex=1.5, bty='n',
+    col = c('deeppink3', 'forestgreen'))
+mtext("Legend", at=0.2, cex=2)
+
+legend("bottomleft", legend =c('hDRG to RA scRNA', 'RA scRNA to hDRG'), lty=1, lwd=2, cex=1.5, bty='n',
+    col = c('cyan', 'brown'))
+mtext("Legend", at=0.2, cex=2)
+```
+
+Below we plot the legend without the outside.
+
+```{r}
+plot(NULL ,xaxt='n',yaxt='n',bty='n',ylab='',xlab='', xlim=0:1, ylim=0:1)
+legend("topleft", legend =c('Ligand', 'Receptor'), pch=c(16, 15), pt.cex=3, cex=1.5, bty='n',
+    col = c('orange', 'blue'), ncol=2)
+
+legend(x = -0.05, y = 0.9,  legend =c('hDRG to RA Synovial Fibroblasts', 'RA Synovial Fibroblasts to hDRG'), lty=1, lwd=2, cex=1.5, bty='n',
+    col = c('cyan', 'brown'))
+mtext("Legend", at=0.08, cex=2)
+```
+
+Below we create the interactome plot for all 16 mouse cell types. First we import the data.
+
+```{r}
+mouse_data <- read.csv('RA_pain_ligands_to_mouseDRG_receptors_interaction_interactome_all.csv', row.names = 1)
+
+# Show all unique ligands
+print(unique(mouse_data$ligand))
+
+# Show all unique receptors
+print(unique(mouse_data$receptor))
+
+# Show all the cell types
+print(unique(mouse_data$receptor_type))
+```
+
+Below we create the mouse interactome plot for all fibroblast subtypes in one figure since there are only 10 ligands and 23 receptors in total. We only have 14 of the 16 total cell types with a corresponding receptor in the interactome. 
+
+```{r, fig.height=10,fig.width=10}
+library(BioCircos)
+
+# Chromosomes on which the Ligand points should be displayed
+points_chromosomes_ligand = c('Ligand', 'Ligand')
+# Coordinates on which the Ligand points should be displayed (length.out = 10 because there are 10 unique genes in the Ligand column 
+points_coordinates_ligand = seq(3, 110, length.out = 10)
+# Values associated with each point, used as radial coordinate 
+# We space them out according to the number of unique ligands
+points_values_ligand = 1:length(points_coordinates_ligand)
+
+# Size of the outside of the circle for ligands and receptors
+# Since there are uniquely 10 ligands and 23 receptor genes, we make the slices of the circle 360 - (10/33*360) = 110 for the ligands and 360 - 110 for the receptors
+myGenome = list("Ligand" = 112,
+        "Receptor" = 249)
+
+# Create circle for cell type identification to lie in
+tracklist = BioCircosBackgroundTrack("myBackgroundTrack", minRadius = 0.6, maxRadius = 0.97,
+  borderColors = "#AAAAAA", borderSize = 0.6, fillColors = "White") 
+
+tracklist = tracklist + BioCircosSNPTrack('Gene Type', points_chromosomes_ligand, points_coordinates_ligand, 
+  points_values_ligand, colors = c("blue", "blue", "blue", "white", "white", "white", "white", "white", "white", "white"), minRadius = 0.93, maxRadius = 0.93)
+
+tracklist = tracklist + BioCircosSNPTrack('Gene Type', points_chromosomes_ligand, points_coordinates_ligand, 
+  points_values_ligand, colors = c("green", "green", "green", "green", "green", "white", "white", "white", "white", "white"), minRadius = 0.83, maxRadius = 0.83)
+
+tracklist = tracklist + BioCircosSNPTrack('Gene Type', points_chromosomes_ligand, points_coordinates_ligand, 
+  points_values_ligand, colors = c("orange", "white", "orange", "white", "orange", "white", "white", "white", "white", "white"), minRadius = 0.73, maxRadius = 0.73)
+
+tracklist = tracklist + BioCircosSNPTrack('Gene Type', points_chromosomes_ligand, points_coordinates_ligand, 
+  points_values_ligand, colors = c("red", "red", "red", "red", "red", "red", "red", "red", "red", "red"), minRadius = 0.63, maxRadius = 0.63)
+
+# Chromosomes on which the receptors should be displayed
+points_chromosomes_receptor = c('Receptor', 'Receptor')
+# Coordinates on which the receptors should be displayed length.out = 23 because there are 11 unique genes in the RA scRNA from the ligand (left column) and receptor data (right column) in f1_data)
+points_coordinates_receptor = seq(3, 247, length.out = 23)
+# Values associated with each point, used as radial coordinate 
+# We space them out according to the number of unique receptors
+points_values_receptor = 1:length(points_chromosomes_receptor)
+
+tracklist = tracklist + BioCircosSNPTrack('Gene Type', points_chromosomes_receptor, points_coordinates_receptor, 
+  points_values_receptor, colors = c("antiquewhite4", "white", "white", "white", "white", "antiquewhite4", "white", "white", "white", "antiquewhite4", "antiquewhite4", "antiquewhite4", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white"), minRadius = 0.62, maxRadius = 0.62)
+
+tracklist = tracklist + BioCircosSNPTrack('Gene Type', points_chromosomes_receptor, points_coordinates_receptor, 
+  points_values_receptor, colors = c("magenta", "magenta", "white", "white", "white", "magenta", "white", "white", "white", "magenta", "magenta", "white", "magenta", "magenta", "magenta", "magenta", "white", "white", "white", "white", "white", "white", "white"), minRadius = 0.645, maxRadius = 0.645)
+
+tracklist = tracklist + BioCircosSNPTrack('Gene Type', points_chromosomes_receptor, points_coordinates_receptor, 
+  points_values_receptor, colors = c("gold", "white", "gold", "white", "white", "white", "white", "white", "white", "gold", "white", "white", "gold", "white", "white", "gold", "white", "white", "white", "white", "white", "white", "white"), minRadius = 0.67, maxRadius = 0.67)
+
+tracklist = tracklist + BioCircosSNPTrack('Gene Type', points_chromosomes_receptor, points_coordinates_receptor, 
+  points_values_receptor, colors = c("white", "white", "white", "black", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white"), minRadius = 0.695, maxRadius = 0.695)
+
+tracklist = tracklist + BioCircosSNPTrack('Gene Type', points_chromosomes_receptor, points_coordinates_receptor, 
+  points_values_receptor, colors = c("white", "white", "white", "blue", "white", "white", "blue", "white", "white", "blue", "blue", "blue", "white", "white", "white", "white", "blue", "white", "white", "white", "white", "white", "white"), minRadius = 0.72, maxRadius = 0.72)
+
+tracklist = tracklist + BioCircosSNPTrack('Gene Type', points_chromosomes_receptor, points_coordinates_receptor, 
+  points_values_receptor, colors = c("blueviolet", "white", "white", "blueviolet", "white", "white", "blueviolet", "white", "white", "blueviolet", "blueviolet", "white", "blueviolet", "white", "blueviolet", "white", "white", "white", "white", "white", "white", "white", "white"), minRadius = 0.745, maxRadius = 0.745)
+
+tracklist = tracklist + BioCircosSNPTrack('Gene Type', points_chromosomes_receptor, points_coordinates_receptor, 
+  points_values_receptor, colors = c("brown", "white", "white", "brown", "white", "white", "brown", "white", "white", "brown", "brown", "brown", "brown", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white"), minRadius = 0.77, maxRadius = 0.77)
+
+tracklist = tracklist + BioCircosSNPTrack('Gene Type', points_chromosomes_receptor, points_coordinates_receptor, 
+  points_values_receptor, colors = c("white", "white", "white", "cadetblue1", "white", "white", "white", "white", "white", "white", "white", "cadetblue1", "cadetblue1", "white", "white", "white", "white", "cadetblue1", "cadetblue1", "white", "white", "white", "white"), minRadius = 0.795, maxRadius = 0.795)
+
+tracklist = tracklist + BioCircosSNPTrack('Gene Type', points_chromosomes_receptor, points_coordinates_receptor, 
+  points_values_receptor, colors = c("white", "white", "white", "chartreuse3", "white", "white", "chartreuse3", "white", "white", "chartreuse3", "chartreuse3", "chartreuse3", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white"), minRadius = 0.82, maxRadius = 0.82)
+
+tracklist = tracklist + BioCircosSNPTrack('Gene Type', points_chromosomes_receptor, points_coordinates_receptor, 
+  points_values_receptor, colors = c("orange", "orange", "white", "white", "orange", "white", "orange", "orange", "orange", "white", "orange", "white", "white", "white", "white", "orange", "white", "white", "white", "white", "orange", "orange", "white"), minRadius = 0.845, maxRadius = 0.845)
+
+tracklist = tracklist + BioCircosSNPTrack('Gene Type', points_chromosomes_receptor, points_coordinates_receptor, 
+  points_values_receptor, colors = c("white", "white", "coral", "white", "coral", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "coral", "white", "white", "white", "coral"), minRadius = 0.87, maxRadius = 0.87)
+
+tracklist = tracklist + BioCircosSNPTrack('Gene Type', points_chromosomes_receptor, points_coordinates_receptor, 
+  points_values_receptor, colors = c("white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "darkgreen", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white"), minRadius = 0.895, maxRadius = 0.895 )
+
+tracklist = tracklist + BioCircosSNPTrack('Gene Type', points_chromosomes_receptor, points_coordinates_receptor, 
+  points_values_receptor, colors = c("white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "firebrick", "white", "white", "firebrick", "white", "white", "white"), minRadius = 0.92, maxRadius = 0.92)
+
+tracklist = tracklist + BioCircosSNPTrack('Gene Type', points_chromosomes_receptor, points_coordinates_receptor, 
+  points_values_receptor, colors = c("darkgrey", "darkgrey", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white"), minRadius = 0.945, maxRadius = 0.945)
+
+tracklist = tracklist + BioCircosTextTrack("testText", 'Mouse Interactome', weight = "bold", size = '1em', x = -0.3, y = -1.25, displayGenomeBorder = TRUE)
+
+links_chromosomes_1 = c('Ligand', 'Ligand', 'Ligand') # Chromosomes on which the links should start
+links_chromosomes_2 = c('Receptor', 'Receptor', 'Receptor') # Chromosomes on which the links should end
+
+# Coordinates to place start of links. The coordinates below correspond to the sequence given by seq(3, 110, length.out = 10) Their starting coordinate must be repeated for the number of connections between them and the number of receptors they are connected to.
+links_pos_1 = c(3, 14.9, 3, 3, 3, 26.8, 26.8, 26.8, 3, 26.8, 3, 26.8, 26.8, 14.9, 14.9, 3, 14.9, 3, 14.9, 3, 38.7, 3, 38.7, 14.9, 3, 3, 3, 26.8, 26.8, 38.7, 26.8, 38.7, 3, 26.8, 38.7, 3, 26.8, 26.8, 38.7, 38.7, 38.7, 38.7, 14.9, 14.9, 3, 14.9, 3, 14.9, 3, 3, 3, 3, 3, 26.8, 26.8, 26.8, 3, 26.8, 3, 26.8, 26.8, 3, 3, 3, 50.6, 50.6, 38.7, 62.4, 74.3, 3, 50.6, 50.6, 50.6, 38.7, 62.4, 74.3, 86.2, 14.9, 3, 50.6, 74.3, 86.2, 3, 3, 74.3, 26.8, 50.6, 50.6, 26.8, 38.7, 62.4, 62.4, 50.6, 50.6, 26.8, 38.7, 62.4, 74.3, 3, 50.6, 50.6, 26.8, 38.7, 62.4, 74.3, 3, 50.6, 26.8, 62.4, 62.4, 74.3, 50.6, 50.6, 26.8, 38.7, 62.4, 62.4, 74.3, 50.6, 98.1, 38.7, 38.7, 38.7, 110, 86.2, 14.9, 14.9, 3, 50.6, 62.4, 14.9, 3, 14.9, 3)
+# Coordinates to place end of links. The coordinates below correspond to the sequence given by seq(3, 247, length.out = 23) but we have 134 values in total. Their ending coordinate must be repeated for the number of connections between them and the number of ligands they are connected to.
+links_pos_2 = c(3, 14.1, 3, 25.2, 3, 36.3, 36.3, 36.3, 3, 36.3, 3, 36.3, 36.3, 47.4, 14.1, 3, 47.4, 25.2, 14.1, 3, 58.5, 3, 58.5, 14.1, 3, 25.2, 3, 36.3, 36.3, 69.5, 36.3, 69.5, 3, 36.3, 69.5, 3, 36.3, 36.3, 69.5, 80.6, 69.5, 91.7, 47.4, 14.1, 3, 47.4, 25.2, 14.1, 3, 3, 3, 25.2, 3, 36.3, 36.3, 36.3, 3, 36.3, 3, 36.3, 36.3, 3, 25.2, 3, 102.8, 113.9, 58.5, 125, 136.1, 3, 147.2, 102.8, 113.9, 58.5, 158.3, 136.1, 169.4, 14.1, 3, 102.8, 136.1, 169.4, 25.2, 3, 136.1, 36.3, 102.8, 113.9, 36.3, 69.5, 180.5, 125, 102.8, 113.9, 36.3, 69.5, 158.3, 136.1, 3, 102.8, 113.9, 36.3, 69.5, 125, 136.1, 3, 191.5, 36.3, 202.6, 125, 136.1, 102.8, 113.9, 36.3, 69.5, 125, 180.5, 213.7, 113.9, 224.8, 80.6, 69.5, 91.7, 235.9, 169.4, 47.4, 14.1, 3, 247, 202.6, 47.4, 25.2, 14.1, 3)
+# The labels are given at the end of the link. Therefore, we label the receptors when starting at the ligands
+links_labels_12 = c('ITGB1', 'VLDLR', '', 'ITGA3', '', 'NTRK1', '', '', '', '', '', '', '', 'SDC4', '', '', '', '', '', '', 'EPHA4', '', '', '', '', '', '', '', '', 'EPHA5', '', '', '', '', '', '', '', '', '', 'EPHA10', '', 'EPHA7', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', 'NGFR', 'TNFRSF21', '', 'CD9', 'NRP1', '', 'NCSTN', '', '', '', 'PRLR', '', 'PLXNA1', '', '', '', '', '', '', '', '', '', '', '', '', '', 'CD44', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', 'CAV1', '', 'CD82', '', '', '', '', '', '', '', '', 'PLXND1', '', 'ERBB3', '', '', '', 'UNC5A', '', '', '', '', 'SCL45A3', '', '', '', '', '') 
+
+tracklist = tracklist + BioCircosLinkTrack('myLinkTrack', links_chromosomes_1, links_pos_1,
+  links_pos_1, links_chromosomes_2, links_pos_2, links_pos_2,
+  maxRadius = 0.4, width = "0.03em", color = 'cyan', labelSize = "0.5em", labels = links_labels_12)
+
+links_chromosomes_3 = c('Receptor', 'Receptor', 'Receptor') # Chromosomes on which the links should start
+links_chromosomes_4 = c('Ligand', 'Ligand', 'Ligand') # Chromosomes on which the links should end
+
+# Now we start at the receptors
+links_pos_3 = c(3, 14.1, 3, 25.2, 3, 36.3, 36.3, 36.3, 3, 36.3, 3, 36.3, 36.3, 47.4, 14.1, 3, 47.4, 25.2, 14.1, 3, 58.5, 3, 58.5, 14.1, 3, 25.2, 3, 36.3, 36.3, 69.5, 36.3, 69.5, 3, 36.3, 69.5, 3, 36.3, 36.3, 69.5, 80.6, 69.5, 91.7, 47.4, 14.1, 3, 47.4, 25.2, 14.1, 3, 3, 3, 25.2, 3, 36.3, 36.3, 36.3, 3, 36.3, 3, 36.3, 36.3, 3, 25.2, 3, 102.8, 113.9, 58.5, 125, 136.1, 3, 147.2, 102.8, 113.9, 58.5, 158.3, 136.1, 169.4, 14.1, 3, 102.8, 136.1, 169.4, 25.2, 3, 136.1, 36.3, 102.8, 113.9, 36.3, 69.5, 180.5, 125, 102.8, 113.9, 36.3, 69.5, 158.3, 136.1, 3, 102.8, 113.9, 36.3, 69.5, 125, 136.1, 3, 191.5, 36.3, 202.6, 125, 136.1, 102.8, 113.9, 36.3, 69.5, 125, 180.5, 213.7, 113.9, 224.8, 80.6, 69.5, 91.7, 235.9, 169.4, 47.4, 14.1, 3, 247, 202.6, 47.4, 25.2, 14.1, 3)
+# Now we end at the ligands
+links_pos_4 = c(3, 14.9, 3, 3, 3, 26.8, 26.8, 26.8, 3, 26.8, 3, 26.8, 26.8, 14.9, 14.9, 3, 14.9, 3, 14.9, 3, 38.7, 3, 38.7, 14.9, 3, 3, 3, 26.8, 26.8, 38.7, 26.8, 38.7, 3, 26.8, 38.7, 3, 26.8, 26.8, 38.7, 38.7, 38.7, 38.7, 14.9, 14.9, 3, 14.9, 3, 14.9, 3, 3, 3, 3, 3, 26.8, 26.8, 26.8, 3, 26.8, 3, 26.8, 26.8, 3, 3, 3, 50.6, 50.6, 38.7, 62.4, 74.3, 3, 50.6, 50.6, 50.6, 38.7, 62.4, 74.3, 86.2, 14.9, 3, 50.6, 74.3, 86.2, 3, 3, 74.3, 26.8, 50.6, 50.6, 26.8, 38.7, 62.4, 62.4, 50.6, 50.6, 26.8, 38.7, 62.4, 74.3, 3, 50.6, 50.6, 26.8, 38.7, 62.4, 74.3, 3, 50.6, 26.8, 62.4, 62.4, 74.3, 50.6, 50.6, 26.8, 38.7, 62.4, 62.4, 74.3, 50.6, 98.1, 38.7, 38.7, 38.7, 110, 86.2, 14.9, 14.9, 3, 50.6, 62.4, 14.9, 3, 14.9, 3)
+# These links are for the ligands
+links_labels_34 = c('TIMP2', 'TFPI', '', '', '', 'CTGF', '', '', '', '', '', '', '', '', '', '', '', '', '', '', 'EFNA5', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', 'APP', '', '', 'HBEGF', 'SEMA3E', '', '', '', '', '', '', '', 'SEMA6D', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', 'BTC', '', '', '', 'NTN4', '', '', '', '', '', '', '', '', '', '')
+
+tracklist = tracklist + BioCircosLinkTrack('myLinkTrack', links_chromosomes_3, links_pos_3,
+  links_pos_3, links_chromosomes_4, links_pos_4, links_pos_4,
+  maxRadius = 0.4, width = "0.03em", color = 'cyan', labelSize = "0.5em", labels = links_labels_34, labelPadding = 3)
+
+#links_chromosomes_5 = c('ligand', 'hDRG', 'hDRG') # Chromosomes on which the links should start
+#links_chromosomes_6 = c('RA', 'RA', 'RA') # Chromosomes on which the links should end
+#links_pos_5 = c(180.08, 187.46, 194.84, 202.22, 209.59, 216.97, 224.35, 231.73, 239.11, 216.97, 246.49, 253.86, 261.24, 268.62, 276)
+#links_pos_6 = c(48, 55.5, 55.5, 55.5, 55.5, 55.5, 55.5, 55.5, 63, 63, 63, 63, 70.5, 70.5, 78)
+#links_labels_56 = c("", "", '', '', '', '', '', '', "", '', '', '', "", '', "")
+
+#tracklist = tracklist + BioCircosLinkTrack('myLinkTrack', links_chromosomes_5, links_pos_5,
+#  links_pos_5, links_chromosomes_6, links_pos_6, links_pos_6,
+#  maxRadius = 0.5, width = "0.01em", color = 'brown', labelSize = "0.5em", labels = links_labels_56)
+
+# Create inside arc for RA scRNA gene identification
+#arcs_chromosomes = c('RA') # Chromosomes on which the arcs should be displayed
+#arcs_begin = c(0)
+#arcs_end = c(81)
+
+#tracklist = tracklist + BioCircosArcTrack('myArcTrack', arcs_chromosomes, arcs_begin, arcs_end, minRadius = 0.85, maxRadius = 0.99, colors = 'forestgreen') 
+
+BioCircos(tracklist, genome = myGenome, genomeFillColor = c('deeppink3', 'forestgreen'), chrPad = 0.05, displayGenomeBorder = FALSE, yChr =  FALSE,
+  genomeTicksDisplay = FALSE,  genomeLabelTextSize = 18, genomeLabelDy = 0, width = 650, height = 650)
+```
+Below we plot the legend for the fibroblast subtypes.
+
+```{r}
+plot(NULL ,xaxt='n',yaxt='n',bty='n',ylab='',xlab='', xlim=0:1, ylim=0:1)
+legend("left", legend =c('F1', 'F2', 'F3', 'F4'), pch=16, pt.cex=3, cex=1.5, bty='n',
+    col = c('blue', 'green', 'orange', 'red'))
+```
+
+Below we plot the legend for the cell types.
+
+```{r}
+plot(NULL ,xaxt='n',yaxt='n',bty='n',ylab='',xlab='', xlim=0:1, ylim=0:1)
+legend("left", legend =c('Abeta-Field', 'Abeta-RA-LTMR', 'Adelta-LTMR', 'CGRP-Alpha', 'CGRP-Epsilion', 'CGRP-Eta', 'CGRP-Gamma', 'CGRP-Theta', 'CGRP-Zeta', 'Proprioceptors', 'Sst', 'C-LTMR', 'Nonpeptidergic Nociceptors', 'Unknown'), pch=16, pt.cex=1, cex=0.95, bty='n',
+    col = c('antiquewhite4', 'magenta', 'gold', 'black', 'blue', 'blueviolet', 'brown', 'cadetblue1', 'chartreuse3', 'orange', 'coral', 'darkgreen', 'firebrick', 'darkgray'))
+```
+
+Below we create the same thing but without the unknown cell types. 
+
+```{r, fig.height=10,fig.width=10}
+library(BioCircos)
+
+# Chromosomes on which the Ligand points should be displayed
+points_chromosomes_ligand = c('Ligand', 'Ligand')
+# Coordinates on which the Ligand points should be displayed (length.out = 10 because there are 10 unique genes in the Ligand column 
+points_coordinates_ligand = seq(3, 110, length.out = 10)
+# Values associated with each point, used as radial coordinate 
+# We space them out according to the number of unique ligands
+points_values_ligand = 1:length(points_coordinates_ligand)
+
+# Size of the outside of the circle for ligands and receptors
+# Since there are uniquely 10 ligands and 23 receptor genes, we make the slices of the circle 360 - (10/33*360) = 110 for the ligands and 360 - 110 for the receptors
+myGenome = list("Ligand" = 112,
+        "Receptor" = 249)
+
+# Create circle for cell type identification to lie in
+tracklist = BioCircosBackgroundTrack("myBackgroundTrack", minRadius = 0.78, maxRadius = 1.13,
+  borderColors = "#AAAAAA", borderSize = 0.6, fillColors = "White") 
+
+tracklist = tracklist + BioCircosSNPTrack('Gene Type', points_chromosomes_ligand, points_coordinates_ligand, 
+  points_values_ligand, colors = c("blue", "blue", "blue", "white", "white", "white", "white", "white", "white", "white"), minRadius = 1.11, maxRadius = 1.11)
+
+tracklist = tracklist + BioCircosSNPTrack('Gene Type', points_chromosomes_ligand, points_coordinates_ligand, 
+  points_values_ligand, colors = c("green", "green", "green", "green", "green", "white", "white", "white", "white", "white"), minRadius = 1.01, maxRadius = 1.01)
+
+tracklist = tracklist + BioCircosSNPTrack('Gene Type', points_chromosomes_ligand, points_coordinates_ligand, 
+  points_values_ligand, colors = c("orange", "white", "orange", "white", "orange", "white", "white", "white", "white", "white"), minRadius = 0.91, maxRadius = 0.91)
+
+tracklist = tracklist + BioCircosSNPTrack('Gene Type', points_chromosomes_ligand, points_coordinates_ligand, 
+  points_values_ligand, colors = c("red", "red", "red", "red", "red", "red", "red", "red", "red", "red"), minRadius = 0.81, maxRadius = 0.81)
+
+# Chromosomes on which the receptors should be displayed
+points_chromosomes_receptor = c('Receptor', 'Receptor')
+# Coordinates on which the receptors should be displayed length.out = 23 because there are 11 unique genes in the RA scRNA from the ligand (left column) and receptor data (right column) in f1_data)
+points_coordinates_receptor = seq(3, 247, length.out = 23)
+# Values associated with each point, used as radial coordinate 
+# We space them out according to the number of unique receptors
+points_values_receptor = 1:length(points_chromosomes_receptor)
+
+tracklist = tracklist + BioCircosSNPTrack('Gene Type', points_chromosomes_receptor, points_coordinates_receptor, 
+  points_values_receptor, colors = c("antiquewhite4", "white", "white", "white", "white", "antiquewhite4", "white", "white", "white", "antiquewhite4", "antiquewhite4", "antiquewhite4", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white"), minRadius = 0.80, maxRadius = 0.80)
+
+tracklist = tracklist + BioCircosSNPTrack('Gene Type', points_chromosomes_receptor, points_coordinates_receptor, 
+  points_values_receptor, colors = c("magenta", "magenta", "white", "white", "white", "magenta", "white", "white", "white", "magenta", "magenta", "white", "magenta", "magenta", "magenta", "magenta", "white", "white", "white", "white", "white", "white", "white"), minRadius = 0.825, maxRadius = 0.825)
+
+tracklist = tracklist + BioCircosSNPTrack('Gene Type', points_chromosomes_receptor, points_coordinates_receptor, 
+  points_values_receptor, colors = c("gold", "white", "gold", "white", "white", "white", "white", "white", "white", "gold", "white", "white", "gold", "white", "white", "gold", "white", "white", "white", "white", "white", "white", "white"), minRadius = 0.85, maxRadius = 0.85)
+
+tracklist = tracklist + BioCircosSNPTrack('Gene Type', points_chromosomes_receptor, points_coordinates_receptor, 
+  points_values_receptor, colors = c("white", "white", "white", "black", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white"), minRadius = 0.875, maxRadius = 0.875)
+
+tracklist = tracklist + BioCircosSNPTrack('Gene Type', points_chromosomes_receptor, points_coordinates_receptor, 
+  points_values_receptor, colors = c("white", "white", "white", "blue", "white", "white", "blue", "white", "white", "blue", "blue", "blue", "white", "white", "white", "white", "blue", "white", "white", "white", "white", "white", "white"), minRadius = 0.90, maxRadius = 0.90)
+
+tracklist = tracklist + BioCircosSNPTrack('Gene Type', points_chromosomes_receptor, points_coordinates_receptor, 
+  points_values_receptor, colors = c("blueviolet", "white", "white", "blueviolet", "white", "white", "blueviolet", "white", "white", "blueviolet", "blueviolet", "white", "blueviolet", "white", "blueviolet", "white", "white", "white", "white", "white", "white", "white", "white"), minRadius = 0.925, maxRadius = 0.925)
+
+tracklist = tracklist + BioCircosSNPTrack('Gene Type', points_chromosomes_receptor, points_coordinates_receptor, 
+  points_values_receptor, colors = c("brown", "white", "white", "brown", "white", "white", "brown", "white", "white", "brown", "brown", "brown", "brown", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white"), minRadius = 0.95, maxRadius = 0.95)
+
+tracklist = tracklist + BioCircosSNPTrack('Gene Type', points_chromosomes_receptor, points_coordinates_receptor, 
+  points_values_receptor, colors = c("white", "white", "white", "cadetblue1", "white", "white", "white", "white", "white", "white", "white", "cadetblue1", "cadetblue1", "white", "white", "white", "white", "cadetblue1", "cadetblue1", "white", "white", "white", "white"), minRadius = 0.975, maxRadius = 0.975)
+
+tracklist = tracklist + BioCircosSNPTrack('Gene Type', points_chromosomes_receptor, points_coordinates_receptor, 
+  points_values_receptor, colors = c("white", "white", "white", "chartreuse3", "white", "white", "chartreuse3", "white", "white", "chartreuse3", "chartreuse3", "chartreuse3", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white"), minRadius = 1.00, maxRadius = 1.00)
+
+tracklist = tracklist + BioCircosSNPTrack('Gene Type', points_chromosomes_receptor, points_coordinates_receptor, 
+  points_values_receptor, colors = c("orange", "orange", "white", "white", "orange", "white", "orange", "orange", "orange", "white", "orange", "white", "white", "white", "white", "orange", "white", "white", "white", "white", "orange", "orange", "white"), minRadius = 1.025, maxRadius = 1.025)
+
+tracklist = tracklist + BioCircosSNPTrack('Gene Type', points_chromosomes_receptor, points_coordinates_receptor, 
+  points_values_receptor, colors = c("white", "white", "coral", "white", "coral", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "coral", "white", "white", "white", "coral"), minRadius = 1.05, maxRadius = 1.05)
+
+tracklist = tracklist + BioCircosSNPTrack('Gene Type', points_chromosomes_receptor, points_coordinates_receptor, 
+  points_values_receptor, colors = c("white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "darkgreen", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white"), minRadius = 1.075, maxRadius = 1.075 )
+
+tracklist = tracklist + BioCircosSNPTrack('Gene Type', points_chromosomes_receptor, points_coordinates_receptor, 
+  points_values_receptor, colors = c("white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "firebrick", "white", "white", "firebrick", "white", "white", "white"), minRadius = 1.10, maxRadius = 1.10)
+
+#tracklist = tracklist + BioCircosTextTrack("testText", 'Synovial Fibroblast to mDRG', weight = "bold", size = '1em', x = -0.46, y = -1.25, displayGenomeBorder = TRUE)
+
+links_chromosomes_1 = c('Ligand', 'Ligand', 'Ligand') # Chromosomes on which the links should start
+links_chromosomes_2 = c('Receptor', 'Receptor', 'Receptor') # Chromosomes on which the links should end
+
+# Coordinates to place start of links. The coordinates below correspond to the sequence given by seq(3, 110, length.out = 10) Their starting coordinate must be repeated for the number of connections between them and the number of receptors they are connected to.
+links_pos_1 = c(3, 14.9, 3, 3, 3, 26.8, 26.8, 26.8, 3, 26.8, 3, 26.8, 26.8, 14.9, 14.9, 3, 14.9, 3, 14.9, 3, 38.7, 3, 38.7, 14.9, 3, 3, 3, 26.8, 26.8, 38.7, 26.8, 38.7, 3, 26.8, 38.7, 3, 26.8, 26.8, 38.7, 38.7, 38.7, 38.7, 14.9, 14.9, 3, 14.9, 3, 14.9, 3, 3, 3, 3, 3, 26.8, 26.8, 26.8, 3, 26.8, 3, 26.8, 26.8, 3, 3, 3, 50.6, 50.6, 38.7, 62.4, 74.3, 3, 50.6, 50.6, 50.6, 38.7, 62.4, 74.3, 86.2, 14.9, 3, 50.6, 74.3, 86.2, 3, 3, 74.3, 26.8, 50.6, 50.6, 26.8, 38.7, 62.4, 62.4, 50.6, 50.6, 26.8, 38.7, 62.4, 74.3, 3, 50.6, 50.6, 26.8, 38.7, 62.4, 74.3, 3, 50.6, 26.8, 62.4, 62.4, 74.3, 50.6, 50.6, 26.8, 38.7, 62.4, 62.4, 74.3, 50.6, 98.1, 38.7, 38.7, 38.7, 110, 86.2, 14.9, 14.9, 3, 50.6, 62.4, 14.9, 3, 14.9, 3)
+# Coordinates to place end of links. The coordinates below correspond to the sequence given by seq(3, 247, length.out = 23) but we have 134 values in total. Their ending coordinate must be repeated for the number of connections between them and the number of ligands they are connected to.
+links_pos_2 = c(3, 14.1, 3, 25.2, 3, 36.3, 36.3, 36.3, 3, 36.3, 3, 36.3, 36.3, 47.4, 14.1, 3, 47.4, 25.2, 14.1, 3, 58.5, 3, 58.5, 14.1, 3, 25.2, 3, 36.3, 36.3, 69.5, 36.3, 69.5, 3, 36.3, 69.5, 3, 36.3, 36.3, 69.5, 80.6, 69.5, 91.7, 47.4, 14.1, 3, 47.4, 25.2, 14.1, 3, 3, 3, 25.2, 3, 36.3, 36.3, 36.3, 3, 36.3, 3, 36.3, 36.3, 3, 25.2, 3, 102.8, 113.9, 58.5, 125, 136.1, 3, 147.2, 102.8, 113.9, 58.5, 158.3, 136.1, 169.4, 14.1, 3, 102.8, 136.1, 169.4, 25.2, 3, 136.1, 36.3, 102.8, 113.9, 36.3, 69.5, 180.5, 125, 102.8, 113.9, 36.3, 69.5, 158.3, 136.1, 3, 102.8, 113.9, 36.3, 69.5, 125, 136.1, 3, 191.5, 36.3, 202.6, 125, 136.1, 102.8, 113.9, 36.3, 69.5, 125, 180.5, 213.7, 113.9, 224.8, 80.6, 69.5, 91.7, 235.9, 169.4, 47.4, 14.1, 3, 247, 202.6, 47.4, 25.2, 14.1, 3)
+# The labels are given at the end of the link. Therefore, we label the receptors when starting at the ligands
+links_labels_12 = c('ITGB1', 'VLDLR', '', 'ITGA3', '', 'NTRK1', '', '', '', '', '', '', '', 'SDC4', '', '', '', '', '', '', 'EPHA4', '', '', '', '', '', '', '', '', 'EPHA5', '', '', '', '', '', '', '', '', '', 'EPHA10', '', 'EPHA7', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', 'NGFR', 'TNFRSF21', '', 'CD9', 'NRP1', '', 'NCSTN', '', '', '', 'PRLR', '', 'PLXNA1', '', '', '', '', '', '', '', '', '', '', '', '', '', 'CD44', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', 'CAV1', '', 'CD82', '', '', '', '', '', '', '', '', 'PLXND1', '', 'ERBB3', '', '', '', 'UNC5A', '', '', '', '', 'SCL45A3', '', '', '', '', '') 
+
+tracklist = tracklist + BioCircosLinkTrack('myLinkTrack', links_chromosomes_1, links_pos_1,
+  links_pos_1, links_chromosomes_2, links_pos_2, links_pos_2,
+  maxRadius = 0.5, width = "0.03em", color = 'cyan', labelSize = "0.75em", labels = links_labels_12)
+
+links_chromosomes_3 = c('Receptor', 'Receptor', 'Receptor') # Chromosomes on which the links should start
+links_chromosomes_4 = c('Ligand', 'Ligand', 'Ligand') # Chromosomes on which the links should end
+
+# Now we start at the receptors
+links_pos_3 = c(3, 14.1, 3, 25.2, 3, 36.3, 36.3, 36.3, 3, 36.3, 3, 36.3, 36.3, 47.4, 14.1, 3, 47.4, 25.2, 14.1, 3, 58.5, 3, 58.5, 14.1, 3, 25.2, 3, 36.3, 36.3, 69.5, 36.3, 69.5, 3, 36.3, 69.5, 3, 36.3, 36.3, 69.5, 80.6, 69.5, 91.7, 47.4, 14.1, 3, 47.4, 25.2, 14.1, 3, 3, 3, 25.2, 3, 36.3, 36.3, 36.3, 3, 36.3, 3, 36.3, 36.3, 3, 25.2, 3, 102.8, 113.9, 58.5, 125, 136.1, 3, 147.2, 102.8, 113.9, 58.5, 158.3, 136.1, 169.4, 14.1, 3, 102.8, 136.1, 169.4, 25.2, 3, 136.1, 36.3, 102.8, 113.9, 36.3, 69.5, 180.5, 125, 102.8, 113.9, 36.3, 69.5, 158.3, 136.1, 3, 102.8, 113.9, 36.3, 69.5, 125, 136.1, 3, 191.5, 36.3, 202.6, 125, 136.1, 102.8, 113.9, 36.3, 69.5, 125, 180.5, 213.7, 113.9, 224.8, 80.6, 69.5, 91.7, 235.9, 169.4, 47.4, 14.1, 3, 247, 202.6, 47.4, 25.2, 14.1, 3)
+# Now we end at the ligands
+links_pos_4 = c(3, 14.9, 3, 3, 3, 26.8, 26.8, 26.8, 3, 26.8, 3, 26.8, 26.8, 14.9, 14.9, 3, 14.9, 3, 14.9, 3, 38.7, 3, 38.7, 14.9, 3, 3, 3, 26.8, 26.8, 38.7, 26.8, 38.7, 3, 26.8, 38.7, 3, 26.8, 26.8, 38.7, 38.7, 38.7, 38.7, 14.9, 14.9, 3, 14.9, 3, 14.9, 3, 3, 3, 3, 3, 26.8, 26.8, 26.8, 3, 26.8, 3, 26.8, 26.8, 3, 3, 3, 50.6, 50.6, 38.7, 62.4, 74.3, 3, 50.6, 50.6, 50.6, 38.7, 62.4, 74.3, 86.2, 14.9, 3, 50.6, 74.3, 86.2, 3, 3, 74.3, 26.8, 50.6, 50.6, 26.8, 38.7, 62.4, 62.4, 50.6, 50.6, 26.8, 38.7, 62.4, 74.3, 3, 50.6, 50.6, 26.8, 38.7, 62.4, 74.3, 3, 50.6, 26.8, 62.4, 62.4, 74.3, 50.6, 50.6, 26.8, 38.7, 62.4, 62.4, 74.3, 50.6, 98.1, 38.7, 38.7, 38.7, 110, 86.2, 14.9, 14.9, 3, 50.6, 62.4, 14.9, 3, 14.9, 3)
+# These links are for the ligands
+links_labels_34 = c('TIMP2', 'TFPI', '', '', '', 'CTGF', '', '', '', '', '', '', '', '', '', '', '', '', '', '', 'EFNA5', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', 'APP', '', '', 'HBEGF', 'SEMA3E', '', '', '', '', '', '', '', 'SEMA6D', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', 'BTC', '', '', '', 'NTN4', '', '', '', '', '', '', '', '', '', '')
+
+tracklist = tracklist + BioCircosLinkTrack('myLinkTrack', links_chromosomes_3, links_pos_3,
+  links_pos_3, links_chromosomes_4, links_pos_4, links_pos_4,
+  maxRadius = 0.5, width = "0.03em", color = 'cyan', labelSize = "0.75em", labels = links_labels_34, labelPadding = 3)
+
+# Make specific pain genes bold for receptors
+links_chromosomes_5 = c('Receptor', 'Receptor', 'Receptor') # Chromosomes on which the links should start
+links_chromosomes_6 = c('Ligand', 'Ligand', 'Ligand') # Chromosomes on which the links should end
+links_pos_5 = c(235.9, 235.9, 235.9, 235.9, 235.9, 235.9, 235.9, 235.9, 235.9, 235.9, 224.8, 224.8, 224.8, 224.8, 224.8, 224.8, 224.8, 224.8, 224.8, 224.8, 202.6, 202.6, 202.6, 202.6, 202.6, 202.6, 202.6, 202.6, 202.6, 202.6, 36.3, 36.3, 36.3, 36.3, 36.3, 36.3, 36.3, 36.3, 36.3, 36.3)
+links_pos_6 = c(110, 110, 110, 110, 110, 110, 110, 110, 110, 110, 98.1, 98.1, 98.1, 98.1, 98.1, 98.1, 98.1, 98.1, 98.1, 98.1, 62.4, 62.4, 62.4, 62.4, 62.4, 62.4, 62.4, 62.4, 62.4, 62.4, 26.8, 26.8, 26.8, 26.8, 26.8, 26.8, 26.8, 26.8, 26.8, 26.8)
+links_labels_56 = c("NTN4", "NTN4", "NTN4", "NTN4", "NTN4", "NTN4", "NTN4", "NTN4", "NTN4", "NTN4", "BTC", "BTC", "BTC", "BTC", "BTC", "BTC", "BTC", "BTC", "BTC", "BTC", "HBEGF", "HBEGF", "HBEGF", "HBEGF", "HBEGF", "HBEGF", "HBEGF", "HBEGF", "HBEGF", "HBEGF", "CTGF", "CTGF" , "CTGF" , "CTGF" , "CTGF" , "CTGF" , "CTGF" , "CTGF" , "CTGF" , "CTGF")
+
+tracklist = tracklist + BioCircosLinkTrack('myLinkTrack', links_chromosomes_5, links_pos_5,
+  links_pos_5, links_chromosomes_6, links_pos_6, links_pos_6,
+  maxRadius = 0.5, width = "0.03em", color = 'cyan', labelSize = "0.75em", labels = links_labels_56)
+
+# Make specific pain genes bold for ligands
+links_chromosomes_7 = c('Ligand', 'Ligand', 'Ligand') # Chromosomes on which the links should start
+links_chromosomes_8 = c('Receptor', 'Receptor', 'Receptor') # Chromosomes on which the links should end
+links_pos_7 = c(98.1, 98.1, 98.1, 98.1, 98.1, 98.1, 98.1, 98.1, 98.1, 98.1, 110, 110, 110, 110, 110, 110, 110, 110, 110, 110)
+links_pos_8 = c(224.8, 224.8, 224.8, 224.8, 224.8, 224.8, 224.8, 224.8, 224.8, 224.8, 235.9, 235.9, 235.9, 235.9, 235.9, 235.9, 235.9, 235.9, 235.9, 235.9)
+links_labels_78 = c("ERBB3", "ERBB3", "ERBB3", "ERBB3", "ERBB3", "ERBB3", "ERBB3", "ERBB3", "ERBB3", "ERBB3", "UNC5A", "UNC5A", "UNC5A", "UNC5A", "UNC5A", "UNC5A", "UNC5A", "UNC5A", "UNC5A", "UNC5A")
+
+tracklist = tracklist + BioCircosLinkTrack('myLinkTrack', links_chromosomes_7, links_pos_7,
+  links_pos_7, links_chromosomes_8, links_pos_8, links_pos_8,
+  maxRadius = 0.5, width = "0.03em", color = 'cyan', labelSize = "0.75em", labels = links_labels_78)
+
+# Make connection for NTN4 wider
+links_chromosomes_9 = c('Receptor') # Chromosomes on which the links should start
+links_chromosomes_10 = c('Ligand') # Chromosomes on which the links should end
+links_pos_9 = c(235.9)
+links_pos_10 = c(110)
+links_labels_910 = c("")
+
+tracklist = tracklist + BioCircosLinkTrack('myLinkTrack', links_chromosomes_9, links_pos_9,
+  links_pos_9, links_chromosomes_10, links_pos_10, links_pos_10,
+  maxRadius = 0.5, width = "0.15em", color = 'cyan', labelSize = "0.5em", labels = links_labels_910)
+
+# Create inside arc for RA scRNA gene identification
+#arcs_chromosomes = c('RA') # Chromosomes on which the arcs should be displayed
+#arcs_begin = c(0)
+#arcs_end = c(81)
+
+#tracklist = tracklist + BioCircosArcTrack('myArcTrack', arcs_chromosomes, arcs_begin, arcs_end, minRadius = 0.85, maxRadius = 0.99, colors = 'forestgreen') 
+
+# Create inside arc for RA scRNA gene identification
+arcs_chromosomes_ra = c('Receptor') # Chromosomes on which the arcs should be displayed
+arcs_begin_ra = c(0)
+arcs_end_ra = c(249)
+
+tracklist = tracklist + BioCircosArcTrack('myArcTrack', arcs_chromosomes_ra, arcs_begin_ra, arcs_end_ra, minRadius = 1.15, maxRadius = 1.20, colors = 'forestgreen') 
+
+# Create inside arc for RA scRNA gene identification
+arcs_chromosomes_hdrg = c('Ligand') # Chromosomes on which the arcs should be displayed
+arcs_begin_hdrg = c(0)
+arcs_end_hdrg = c(112)
+
+tracklist = tracklist + BioCircosArcTrack('myArcTrack', arcs_chromosomes_hdrg, arcs_begin_hdrg, arcs_end_hdrg, minRadius = 1.15, maxRadius = 1.20, colors = 'deeppink3')
+
+
+tracklist = tracklist + BioCircosTextTrack('MytextTrack', 'Ligand', x = 0.75, y = -1, size = "1em",
+  weight = "bold", opacity = 1, color = "#000000")
+
+tracklist = tracklist + BioCircosTextTrack('MytextTrack', 'Receptor', x = -0.95, y = 1.1, size = "1em",
+  weight = "bold", opacity = 1, color = "#000000")
+
+BioCircos(tracklist, genome = myGenome, genomeFillColor = c('white', 'white'), chrPad = 0.05, displayGenomeBorder = FALSE, yChr =  FALSE,
+  genomeTicksDisplay = FALSE,  genomeLabelTextSize = 0, genomeLabelDy = 0, width = 650, height = 650)
+```
+
+Below we plot the legend for the fibroblast subtypes.
+
+```{r}
+plot(NULL ,xaxt='n',yaxt='n',bty='n',ylab='',xlab='', xlim=0:1, ylim=0:1)
+legend("topleft", legend =c('F1 (3)', 'F2 (5)', 'F3 (3)', 'F4 (10)'), pch=16, pt.cex=3, cex=1.5, bty='n',
+    col = c('blue', 'green', 'orange', 'red'))
+mtext("Fibroblast Subtypes", at=0.24, cex=2)
+
+```
+
+Below we plot the legend for the cell types.
+
+```{r}
+plot(NULL ,xaxt='n',yaxt='n',bty='n',ylab='',xlab='', xlim=0:1, ylim=0:1)
+legend("topleft", legend =c('Abeta-Field (6)', 'Abeta-RA-LTMR (9)', 'Adelta-LTMR (5)', 'CGRP-Alpha (1)', 'CGRP-Epsilion (6)', 'CGRP-Eta (7)', 'CGRP-Gamma (7)', 'CGRP-Theta (5)', 'CGRP-Zeta (5)', 'Proprioceptors (10)', 'Sst (4)', 'C-LTMR (1)', 'Nonpeptidergic Nociceptors (2)'), pch=16, pt.cex=1, cex=0.95, bty='n',
+    col = c('antiquewhite4', 'magenta', 'gold', 'black', 'blue', 'blueviolet', 'brown', 'cadetblue1', 'chartreuse3', 'orange', 'coral', 'darkgreen', 'firebrick'))
+mtext("mDRG Neuronal Cell Types", at=0.19, cex=1.1)
+
+```
+
+Below we create the interactome plot for all 16 mouse cell types. First we import the data.
+
+```{r}
+mouse_data_receptor <- read.csv('mouseDRG_ligands_to_RA_pain_receptors_interaction_interactome_all.csv', row.names = 1)
+
+# Show all unique ligands
+print(unique(mouse_data_receptor$ligand))
+
+# Show all unique receptors
+print(unique(mouse_data_receptor$receptor))
+
+# Show all the cell types
+print(unique(mouse_data_receptor$receptor_type))
+```
+
+Below we create the interactome plot from the receptors to the ligands without the unknown cell types. 
+
+```{r, fig.height=10,fig.width=10}
+library(BioCircos)
+
+# Chromosomes on which the Receptor points should be displayed
+points_chromosomes_ligand = c('Receptor', 'Receptor')
+# Coordinates on which the Receptor points should be displayed (length.out = 9 because there are 9 unique genes in the Receptor column 
+points_coordinates_ligand = seq(3, 113, length.out = 9)
+# Values associated with each point, used as radial coordinate 
+# We space them out according to the number of unique ligands
+points_values_ligand = 1:length(points_coordinates_ligand)
+
+# Size of the outside of the circle for ligands and receptors
+# Since there are uniquely 9 ligands and 23 receptor genes, we make the slices of the circle 9/28*360 = 116 for the receptors and 360 - 116 for the ligands
+myGenome = list("Receptor" = 116,
+        "Ligand" = 244)
+
+# Create circle for cell type identification to lie in
+tracklist = BioCircosBackgroundTrack("myBackgroundTrack", minRadius = 0.6, maxRadius = 0.96,
+  borderColors = "#AAAAAA", borderSize = 0.6, fillColors = "White") 
+
+tracklist = tracklist + BioCircosSNPTrack('Gene Type', points_chromosomes_ligand, points_coordinates_ligand, 
+  points_values_ligand, colors = c("blue", "blue", "white", "white", "white", "blue", "white", "white", "blue"), minRadius = 0.93, maxRadius = 0.93)
+
+tracklist = tracklist + BioCircosSNPTrack('Gene Type', points_chromosomes_ligand, points_coordinates_ligand, 
+  points_values_ligand, colors = c("green", "white", "green", "white", "white", "white", "white", "white", "green"), minRadius = 0.83, maxRadius = 0.83)
+
+tracklist = tracklist + BioCircosSNPTrack('Gene Type', points_chromosomes_ligand, points_coordinates_ligand, 
+  points_values_ligand, colors = c("orange", "orange", "orange", "white", "white", "white", "orange", "orange", "orange"), minRadius = 0.73, maxRadius = 0.73)
+
+tracklist = tracklist + BioCircosSNPTrack('Gene Type', points_chromosomes_ligand, points_coordinates_ligand, 
+  points_values_ligand, colors = c("red", "white", "red", "red", "red", "red", "red", "white", "white"), minRadius = 0.63, maxRadius = 0.63)
+
+# Chromosomes on which the ligand should be displayed
+points_chromosomes_receptor = c('Ligand', 'Ligand')
+# Coordinates on which the ligand should be displayed length.out = 23 because there are 11 unique genes in the RA scRNA from the ligand (left column) and receptor data (right column) in f1_data)
+points_coordinates_receptor = seq(3, 241, length.out = 19)
+# Values associated with each point, used as radial coordinate 
+# We space them out according to the number of unique receptors
+points_values_receptor = 1:length(points_chromosomes_receptor)
+
+tracklist = tracklist + BioCircosSNPTrack('Gene Type', points_chromosomes_receptor, points_coordinates_receptor, 
+  points_values_receptor, colors = c("antiquewhite4", "antiquewhite4", "antiquewhite4", "antiquewhite4", "antiquewhite4", "antiquewhite4", "antiquewhite4", "antiquewhite4", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white"), minRadius = 0.62, maxRadius = 0.62)
+
+tracklist = tracklist + BioCircosSNPTrack('Gene Type', points_chromosomes_receptor, points_coordinates_receptor, 
+  points_values_receptor, colors = c("magenta", "magenta", "white", "magenta", "magenta", "magenta", "magenta", "magenta", "magenta", "magenta", "magenta", "white", "white", "white", "white", "white", "white", "white", "white"), minRadius = 0.645, maxRadius = 0.645)
+
+tracklist = tracklist + BioCircosSNPTrack('Gene Type', points_chromosomes_receptor, points_coordinates_receptor, 
+  points_values_receptor, colors = c("gold", "white", "white", "gold", "white", "gold", "white", "gold", "gold", "white", "gold", "white", "white", "white", "white", "white", "white", "white", "white"), minRadius = 0.67, maxRadius = 0.67)
+
+tracklist = tracklist + BioCircosSNPTrack('Gene Type', points_chromosomes_receptor, points_coordinates_receptor, 
+  points_values_receptor, colors = c("black", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "black", "black", "white", "white", "white", "white"), minRadius = 0.695, maxRadius = 0.695)
+
+# CGRP-Beta
+tracklist = tracklist + BioCircosSNPTrack('Gene Type', points_chromosomes_receptor, points_coordinates_receptor, 
+  points_values_receptor, colors = c("darkgray", "white", "white", "white", "white", "white", "white", "white", "darkgray", "white", "white", "white", "darkgray", "darkgray", "white", "darkgray", "white", "white", "white"), minRadius = 0.72, maxRadius = 0.72)
+
+tracklist = tracklist + BioCircosSNPTrack('Gene Type', points_chromosomes_receptor, points_coordinates_receptor, 
+  points_values_receptor, colors = c("blue", "blue", "white", "white", "white", "white", "blue", "white", "white", "blue", "white", "white", "white", "blue", "white", "white", "white", "white", "white"), minRadius = 0.745, maxRadius = 0.745)
+
+tracklist = tracklist + BioCircosSNPTrack('Gene Type', points_chromosomes_receptor, points_coordinates_receptor, 
+  points_values_receptor, colors = c("blueviolet", "white", "white", "blueviolet", "white", "blueviolet", "blueviolet", "blueviolet", "white", "white", "white", "blueviolet", "white", "white", "white", "white", "white", "white", "white"), minRadius = 0.77, maxRadius = 0.77)
+
+tracklist = tracklist + BioCircosSNPTrack('Gene Type', points_chromosomes_receptor, points_coordinates_receptor, 
+  points_values_receptor, colors = c("brown", "white", "white", "white", "white", "brown", "white", "white", "brown", "white", "white", "white", "brown", "brown", "brown", "white", "white", "white", "white"), minRadius = 0.795, maxRadius = 0.795)
+
+tracklist = tracklist + BioCircosSNPTrack('Gene Type', points_chromosomes_receptor, points_coordinates_receptor, 
+  points_values_receptor, colors = c("cadetblue1", "white", "white", "white", "cadetblue1", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white"), minRadius = 0.82, maxRadius = 0.82)
+
+tracklist = tracklist + BioCircosSNPTrack('Gene Type', points_chromosomes_receptor, points_coordinates_receptor, 
+  points_values_receptor, colors = c("chartreuse3", "white", "white", "white", "white", "chartreuse3", "white", "chartreuse3", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white"), minRadius = 0.845, maxRadius = 0.845)
+
+tracklist = tracklist + BioCircosSNPTrack('Gene Type', points_chromosomes_receptor, points_coordinates_receptor, 
+  points_values_receptor, colors = c("orange", "orange", "white", "white", "orange", "orange", "orange", "orange", "orange", "orange", "orange", "white", "white", "white", "white", "white", "orange", "white", "white"), minRadius = 0.87, maxRadius = 0.87)
+
+tracklist = tracklist + BioCircosSNPTrack('Gene Type', points_chromosomes_receptor, points_coordinates_receptor, 
+  points_values_receptor, colors = c("white", "white", "white", "white", "white", "white", "white", "white", "white", "coral", "white", "white", "white", "coral", "white", "white", "white", "white", "white"), minRadius = 0.895, maxRadius = 0.895)
+
+tracklist = tracklist + BioCircosSNPTrack('Gene Type', points_chromosomes_receptor, points_coordinates_receptor, 
+  points_values_receptor, colors = c("darkgreen", "white", "white", "white", "white", "white", "white", "white", "white", "white", "darkgreen", "darkgreen", "white", "white", "white", "white", "white", "white", "white"), minRadius = 0.92, maxRadius = 0.92)
+
+
+
+#tracklist = tracklist + BioCircosTextTrack("testText", 'Synovial Fibroblast to mDRG', weight = "bold", size = '1em', x = -0.46, y = -1.25, displayGenomeBorder = TRUE)
+
+links_chromosomes_1 = c('Receptor', 'Receptor', 'Receptor') # Chromosomes on which the links should start
+links_chromosomes_2 = c('Ligand', 'Ligand', 'Ligand') # Chromosomes on which the links should end
+
+# Coordinates to place start of links. The coordinates below correspond to the sequence given by seq(3, 113, length.out = 9) Their starting coordinate must be repeated for the number of connections between them and the number of receptors they are connected to.
+links_pos_1 = c(3, 3, 16.75, 30.5, 3, 3, 30.5, 30.5, 3, 3, 30.5, 16.75, 30.5, 44.25, 44.25, 3, 3, 30.5, 58, 3, 3, 71.75, 30.5, 30.5, 3, 3, 30.5, 30.5, 30.5, 3, 3, 30.5, 85.5, 30.5, 44.25, 44.25, 30.5, 3, 3, 30.5, 58, 71.75, 85.5, 3, 71.75, 30.5, 3, 30.5, 3, 85.5, 30.5, 44.25, 3, 58, 71.75, 85.5, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 16.75, 3, 3, 3, 3, 16.75, 3, 3, 3, 3, 3, 71.75, 3, 3, 30.5, 3, 3, 3, 30.5, 3, 3, 3, 30.5, 3, 71.75, 3, 3, 30.5, 3, 3, 30.5, 3, 3, 30.5, 3, 3, 3, 3, 3, 30.5, 3, 3, 3, 30.5, 3, 3, 3, 30.5, 44.25, 44.25, 3, 3, 3, 58, 3, 3, 3, 71.75, 16.75, 3, 3, 3, 3, 3, 3, 16.75, 44.25, 3, 3, 3, 71.75, 3, 3, 30.5, 3, 30.5, 3, 30.5, 3, 3, 3, 44.25, 3, 58, 3, 3, 71.75, 71.75, 30.5, 3, 3, 30.5, 30.5, 3, 3, 99.25, 30.5, 85.5, 44.25, 44.25, 30.5, 3, 3, 71.75, 30.5, 58, 71.75, 85.5, 3, 30.5, 3, 30.5, 3, 30.5, 3, 3, 113, 16.75, 3, 113, 3, 113, 16.75, 3)
+# Coordinates to place end of links. The coordinates below correspond to the sequence given by seq(3, 247, length.out = 23) but we have 134 values in total. Their ending coordinate must be repeated for the number of connections between them and the number of ligands they are connected to.
+links_pos_2 = c(3, 16.9, 29.4, 42.7, 3, 16.2, 55.9, 42.7, 3, 16.2, 55.9, 29.4, 42.7, 69.1, 82.3, 3, 16.2, 55.9, 95.6, 3, 16.2, 108.8, 42.7, 122, 3, 16.2, 55.9, 42.7, 122, 3, 16.2, 55.9, 135.2, 42.7, 69.1, 82.3, 122, 3, 16.2, 55.9, 95.6, 108.8, 135.2, 3, 108.8, 42.7, 3, 42.7, 3, 135.2, 42.7, 69.1, 3, 95.6, 108.8, 135.2, 148.4, 161.7, 148.4, 161.7, 148.4, 161.7, 148.4, 161.7, 3, 174.9, 188.1, 3, 174.9, 3, 174.9, 188.1, 3, 174.9, 3, 174.9, 161.7, 108.8, 3, 174.9, 201.3, 161.7, 3, 174.9, 201.3, 161.7, 3, 174.9, 201.3, 161.7, 108.8, 3, 174.9, 122, 3, 174.9, 122, 3, 174.9, 122, 3, 174.9, 3, 148.4, 16.2, 42.7, 3, 148.4, 16.2, 42.7, 3, 148.4, 16.2, 42.7, 69.1, 82.3, 3, 148.4, 16.2, 95.6, 3, 174.9, 161.7, 108.8, 188.1, 3, 174.9, 161.7, 3, 174.9, 161.7, 188.1, 69.1, 3, 174.9, 161.7, 108.8, 3, 3, 55.9, 3, 55.9, 3, 55.9, 3, 3, 3, 69.1, 3, 95.6, 3, 16.2, 214.6, 108.8, 122, 3, 16.2, 55.9, 122, 3, 16.2, 214.6, 55.9, 135.2, 69.1, 82.3, 122, 3, 16.2, 214.6, 55.9, 95.6, 108.8, 135.2, 174.9, 122, 174.9, 122, 174.9, 122, 174.9, 227.8, 241, 188.1, 3, 241, 3, 241, 188.1, 3)
+# The labels are given at the end of the link. 
+links_labels_12 = c('FGF1', 'FGF9', 'TGFB2', 'ADAM9', '', '', 'LTBP3', '', '', '', '', '', '', 'CLSTN1', 'CLSTN3', '', '', '', 'NFASC', '', '', 'PTN', '', 'EDIL3', '', '', '', '', '', '', '', '', 'SHH', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', 'FGF12', 'NCAM1', '', '', '', '', '', '', '', 'FGF13', 'TGFB1', '', '', '', '', '', '', '', '', '', '', '', '', '', 'LTBP1', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', 'LRRC4B', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', 'FGF3', 'LIPH', '', '', '', '', '', '', '') 
+
+tracklist = tracklist + BioCircosLinkTrack('myLinkTrack', links_chromosomes_1, links_pos_1,
+  links_pos_1, links_chromosomes_2, links_pos_2, links_pos_2,
+  maxRadius = 0.4, width = "0.03em", color = 'cyan', labelSize = "0.5em", labels = links_labels_12)
+
+links_chromosomes_3 = c('Ligand', 'Ligand', 'Ligand') # Chromosomes on which the links should start
+links_chromosomes_4 = c('Receptor', 'Receptor', 'Receptor') # Chromosomes on which the links should end
+
+# Now we start at the ligands
+links_pos_3 = c(3, 16.9, 29.4, 42.7, 3, 16.2, 55.9, 42.7, 3, 16.2, 55.9, 29.4, 42.7, 69.1, 82.3, 3, 16.2, 55.9, 95.6, 3, 16.2, 108.8, 42.7, 122, 3, 16.2, 55.9, 42.7, 122, 3, 16.2, 55.9, 135.2, 42.7, 69.1, 82.3, 122, 3, 16.2, 55.9, 95.6, 108.8, 135.2, 3, 108.8, 42.7, 3, 42.7, 3, 135.2, 42.7, 69.1, 3, 95.6, 108.8, 135.2, 148.4, 161.7, 148.4, 161.7, 148.4, 161.7, 148.4, 161.7, 3, 174.9, 188.1, 3, 174.9, 3, 174.9, 188.1, 3, 174.9, 3, 174.9, 161.7, 108.8, 3, 174.9, 201.3, 161.7, 3, 174.9, 201.3, 161.7, 3, 174.9, 201.3, 161.7, 108.8, 3, 174.9, 122, 3, 174.9, 122, 3, 174.9, 122, 3, 174.9, 3, 148.4, 16.2, 42.7, 3, 148.4, 16.2, 42.7, 3, 148.4, 16.2, 42.7, 69.1, 82.3, 3, 148.4, 16.2, 95.6, 3, 174.9, 161.7, 108.8, 188.1, 3, 174.9, 161.7, 3, 174.9, 161.7, 188.1, 69.1, 3, 174.9, 161.7, 108.8, 3, 3, 55.9, 3, 55.9, 3, 55.9, 3, 3, 3, 69.1, 3, 95.6, 3, 16.2, 214.6, 108.8, 122, 3, 16.2, 55.9, 122, 3, 16.2, 214.6, 55.9, 135.2, 69.1, 82.3, 122, 3, 16.2, 214.6, 55.9, 95.6, 108.8, 135.2, 174.9, 122, 174.9, 122, 174.9, 122, 174.9, 227.8, 241, 188.1, 3, 241, 3, 241, 188.1, 3)
+# Now we end at the receptors
+links_pos_4 = c(3, 3, 16.75, 30.5, 3, 3, 30.5, 30.5, 3, 3, 30.5, 16.75, 30.5, 44.25, 44.25, 3, 3, 30.5, 58, 3, 3, 71.75, 30.5, 30.5, 3, 3, 30.5, 30.5, 30.5, 3, 3, 30.5, 85.5, 30.5, 44.25, 44.25, 30.5, 3, 3, 30.5, 58, 71.75, 85.5, 3, 71.75, 30.5, 3, 30.5, 3, 85.5, 30.5, 44.25, 3, 58, 71.75, 85.5, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 16.75, 3, 3, 3, 3, 16.75, 3, 3, 3, 3, 3, 71.75, 3, 3, 30.5, 3, 3, 3, 30.5, 3, 3, 3, 30.5, 3, 71.75, 3, 3, 30.5, 3, 3, 30.5, 3, 3, 30.5, 3, 3, 3, 3, 3, 30.5, 3, 3, 3, 30.5, 3, 3, 3, 30.5, 44.25, 44.25, 3, 3, 3, 58, 3, 3, 3, 71.75, 16.75, 3, 3, 3, 3, 3, 3, 16.75, 44.25, 3, 3, 3, 71.75, 3, 3, 30.5, 3, 30.5, 3, 30.5, 3, 3, 3, 44.25, 3, 58, 3, 3, 71.75, 71.75, 30.5, 3, 3, 30.5, 30.5, 3, 3, 99.25, 30.5, 85.5, 44.25, 44.25, 30.5, 3, 3, 71.75, 30.5, 58, 71.75, 85.5, 3, 30.5, 3, 30.5, 3, 30.5, 3, 3, 113, 16.75, 3, 113, 3, 113, 16.75, 3)
+# These links are for the receptors
+links_labels_34 = c('FGFR1', '', 'TGFBR3', 'ITGB5', '', '', '', '', '', '', '', '', '', 'APP', '', '', '', '', 'ANK3', '', '', 'PTPRS', '', '', '', '', '', '', '', '', '', '', 'CDON', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', 'PTPRD', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', 'LPAR1', '', '', '', '', '', '', '')
+
+tracklist = tracklist + BioCircosLinkTrack('myLinkTrack', links_chromosomes_3, links_pos_3,
+  links_pos_3, links_chromosomes_4, links_pos_4, links_pos_4,
+  maxRadius = 0.4, width = "0.03em", color = 'cyan', labelSize = "0.5em", labels = links_labels_34, labelPadding = 3)
+
+#links_chromosomes_5 = c('ligand', 'hDRG', 'hDRG') # Chromosomes on which the links should start
+#links_chromosomes_6 = c('RA', 'RA', 'RA') # Chromosomes on which the links should end
+#links_pos_5 = c(180.08, 187.46, 194.84, 202.22, 209.59, 216.97, 224.35, 231.73, 239.11, 216.97, 246.49, 253.86, 261.24, 268.62, 276)
+#links_pos_6 = c(48, 55.5, 55.5, 55.5, 55.5, 55.5, 55.5, 55.5, 63, 63, 63, 63, 70.5, 70.5, 78)
+#links_labels_56 = c("", "", '', '', '', '', '', '', "", '', '', '', "", '', "")
+
+#tracklist = tracklist + BioCircosLinkTrack('myLinkTrack', links_chromosomes_5, links_pos_5,
+#  links_pos_5, links_chromosomes_6, links_pos_6, links_pos_6,
+#  maxRadius = 0.5, width = "0.01em", color = 'brown', labelSize = "0.5em", labels = links_labels_56)
+
+# Create inside arc for RA scRNA gene identification
+#arcs_chromosomes = c('RA') # Chromosomes on which the arcs should be displayed
+#arcs_begin = c(0)
+#arcs_end = c(81)
+
+#tracklist = tracklist + BioCircosArcTrack('myArcTrack', arcs_chromosomes, arcs_begin, arcs_end, minRadius = 0.85, maxRadius = 0.99, colors = 'forestgreen') 
+
+BioCircos(tracklist, genome = myGenome, genomeFillColor = c('forestgreen', 'deeppink3'), chrPad = 0.05, displayGenomeBorder = FALSE, yChr =  FALSE,
+  genomeTicksDisplay = FALSE,  genomeLabelTextSize = 18, genomeLabelDy = 0, width = 650, height = 650)
+```
+
+Below we plot the legend for the fibroblast subtypes.
+
+```{r}
+plot(NULL ,xaxt='n',yaxt='n',bty='n',ylab='',xlab='', xlim=0:1, ylim=0:1)
+legend("topleft", legend =c('F1', 'F2', 'F3', 'F4'), pch=16, pt.cex=3, cex=1.5, bty='n',
+    col = c('blue', 'green', 'orange', 'red'))
+mtext("Fibroblast Subtypes", at=0.24, cex=2)
+```
+
+Below we plot the legend for the cell types.
+
+```{r}
+plot(NULL ,xaxt='n',yaxt='n',bty='n',ylab='',xlab='', xlim=0:1, ylim=0:1)
+legend("topleft", legend =c('Abeta-Field (8)', 'Abeta-RA-LTMR (10)', 'Adelta-LTMR (6)', 'CGRP-Alpha (3)', 'CGRP-Beta (5)', 'CGRP-Epsilion (5)', 'CGRP-Eta (6)', 'CGRP-Gamma (5)', 'CGRP-Theta (2)', 'CGRP-Zeta (3)', 'Proprioceptors (11)', 'Sst (2)', 'C-LTMR (3)'), pch=16, pt.cex=1, cex=0.95, bty='n',
+    col = c('antiquewhite4', 'magenta', 'gold', 'black', 'darkgray', 'blue', 'blueviolet', 'brown', 'cadetblue1', 'chartreuse3', 'orange', 'coral', 'darkgreen'))
+mtext("mDRG Neuronal Cell Types", at=0.19, cex=1.1)
+```
+
+BELOW WE REPEAT THE SAME PROCESS AS DIRECTLY ABOVE BUT WE TAKE OUT ALL GENES THAT ARE ONLY ASSOCIATED WITH UNKNOWN CELL TYPES!
+
+```{r}
+mouse_data_receptor <- read.csv('mouseDRG_ligands_to_RA_pain_receptors_interaction_interactome_all.csv', row.names = 1)
+
+# Show all unique ligands
+print(unique(mouse_data_receptor$ligand))
+
+# Show all unique receptors
+print(unique(mouse_data_receptor$receptor))
+
+# Show all the cell types
+print(unique(mouse_data_receptor$receptor_type))
+```
+
+Below we create the same interactome plot from the receptors to the ligands without the unknown cell types and take out the genes that were only associated with the unknown cell type.
+
+```{r, fig.height=10,fig.width=10}
+library(BioCircos)
+
+# Chromosomes on which the Receptor points should be displayed
+points_chromosomes_ligand = c('Receptor', 'Receptor')
+# Coordinates on which the Receptor points should be displayed (length.out = 8 because there are 8 unique genes in the Receptor column 
+points_coordinates_ligand = seq(3, 113, length.out = 8)
+# Values associated with each point, used as radial coordinate 
+# We space them out according to the number of unique ligands
+points_values_ligand = 1:length(points_coordinates_ligand)
+
+# Size of the outside of the circle for ligands and receptors
+# Since there are uniquely 10 ligands and 23 receptor genes, we make the slices of the circle 8/25*360 = 115 for the receptors and 360 - 116 for the ligands
+myGenome = list("Receptor" = 116,
+        "Ligand" = 244)
+
+# Create circle for cell type identification to lie in
+tracklist = BioCircosBackgroundTrack("myBackgroundTrack", minRadius = 0.78, maxRadius = 1.13,
+  borderColors = "#AAAAAA", borderSize = 0.6, fillColors = "White") 
+
+tracklist = tracklist + BioCircosSNPTrack('Gene Type', points_chromosomes_ligand, points_coordinates_ligand, 
+  points_values_ligand, colors = c("blue", "blue", "white", "white", "white", "blue", "white", "white"), minRadius = 1.11, maxRadius = 1.11)
+
+tracklist = tracklist + BioCircosSNPTrack('Gene Type', points_chromosomes_ligand, points_coordinates_ligand, 
+  points_values_ligand, colors = c("green", "white", "green", "white", "white", "white", "white", "white"), minRadius = 1.01, maxRadius = 1.01)
+
+tracklist = tracklist + BioCircosSNPTrack('Gene Type', points_chromosomes_ligand, points_coordinates_ligand, 
+  points_values_ligand, colors = c("orange", "orange", "orange", "white", "white", "white", "orange", "orange"), minRadius = 0.91, maxRadius = 0.91)
+
+tracklist = tracklist + BioCircosSNPTrack('Gene Type', points_chromosomes_ligand, points_coordinates_ligand, 
+  points_values_ligand, colors = c("red", "white", "red", "red", "red", "red", "red", "white"), minRadius = 0.81, maxRadius = 0.81)
+
+# Chromosomes on which the ligand should be displayed
+points_chromosomes_receptor = c('Ligand', 'Ligand')
+# Coordinates on which the ligand should be displayed length.out = 17 
+points_coordinates_receptor = seq(3, 241, length.out = 17)
+# Values associated with each point, used as radial coordinate 
+# We space them out according to the number of unique receptors
+points_values_receptor = 1:length(points_chromosomes_receptor)
+
+tracklist = tracklist + BioCircosSNPTrack('Gene Type', points_chromosomes_receptor, points_coordinates_receptor, 
+  points_values_receptor, colors = c("antiquewhite4", "antiquewhite4", "antiquewhite4", "antiquewhite4", "antiquewhite4", "antiquewhite4", "antiquewhite4", "antiquewhite4", "white", "white", "white", "white", "white", "white", "white", "white", "white"), minRadius = 0.80, maxRadius = 0.80)
+
+tracklist = tracklist + BioCircosSNPTrack('Gene Type', points_chromosomes_receptor, points_coordinates_receptor, 
+  points_values_receptor, colors = c("magenta", "magenta", "white", "magenta", "magenta", "magenta", "magenta", "magenta", "magenta", "magenta", "magenta", "white", "white", "white", "white", "white", "white"), minRadius = 0.825, maxRadius = 0.825)
+
+tracklist = tracklist + BioCircosSNPTrack('Gene Type', points_chromosomes_receptor, points_coordinates_receptor, 
+  points_values_receptor, colors = c("gold", "white", "white", "gold", "white", "gold", "white", "gold", "gold", "white", "gold", "white", "white", "white", "white", "white", "white"), minRadius = 0.85, maxRadius = 0.85)
+
+tracklist = tracklist + BioCircosSNPTrack('Gene Type', points_chromosomes_receptor, points_coordinates_receptor, 
+  points_values_receptor, colors = c("black", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "black", "black", "white", "white"), minRadius = 0.875, maxRadius = 0.875)
+
+# CGRP-Beta
+tracklist = tracklist + BioCircosSNPTrack('Gene Type', points_chromosomes_receptor, points_coordinates_receptor, 
+  points_values_receptor, colors = c("darkgray", "white", "white", "white", "white", "white", "white", "white", "darkgray", "white", "white", "white", "darkgray", "darkgray", "white", "darkgray", "white"), minRadius = 0.90, maxRadius = 0.90)
+
+tracklist = tracklist + BioCircosSNPTrack('Gene Type', points_chromosomes_receptor, points_coordinates_receptor, 
+  points_values_receptor, colors = c("blue", "blue", "white", "white", "white", "white", "blue", "white", "white", "blue", "white", "white", "white", "blue", "white", "white", "white"), minRadius = 0.925, maxRadius = 0.925)
+
+tracklist = tracklist + BioCircosSNPTrack('Gene Type', points_chromosomes_receptor, points_coordinates_receptor, 
+  points_values_receptor, colors = c("blueviolet", "white", "white", "blueviolet", "white", "blueviolet", "blueviolet", "blueviolet", "white", "white", "white", "blueviolet", "white", "white", "white", "white", "white"), minRadius = 0.95, maxRadius = 0.95)
+
+tracklist = tracklist + BioCircosSNPTrack('Gene Type', points_chromosomes_receptor, points_coordinates_receptor, 
+  points_values_receptor, colors = c("brown", "white", "white", "white", "white", "brown", "white", "white", "brown", "white", "white", "white", "brown", "brown", "brown", "white", "white"), minRadius = 0.975, maxRadius = 0.975)
+
+tracklist = tracklist + BioCircosSNPTrack('Gene Type', points_chromosomes_receptor, points_coordinates_receptor, 
+  points_values_receptor, colors = c("cadetblue1", "white", "white", "white", "cadetblue1", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white"), minRadius = 1.00, maxRadius = 1.00)
+
+tracklist = tracklist + BioCircosSNPTrack('Gene Type', points_chromosomes_receptor, points_coordinates_receptor, 
+  points_values_receptor, colors = c("chartreuse3", "white", "white", "white", "white", "chartreuse3", "white", "chartreuse3", "white", "white", "white", "white", "white", "white", "white", "white", "white"), minRadius = 1.025, maxRadius = 1.025)
+
+tracklist = tracklist + BioCircosSNPTrack('Gene Type', points_chromosomes_receptor, points_coordinates_receptor, 
+  points_values_receptor, colors = c("orange", "orange", "white", "white", "orange", "orange", "orange", "orange", "orange", "orange", "orange", "white", "white", "white", "white", "white", "orange"), minRadius = 1.05, maxRadius = 1.05)
+
+tracklist = tracklist + BioCircosSNPTrack('Gene Type', points_chromosomes_receptor, points_coordinates_receptor, 
+  points_values_receptor, colors = c("white", "white", "white", "white", "white", "white", "white", "white", "white", "coral", "white", "white", "white", "coral", "white", "white", "white"), minRadius = 1.075, maxRadius = 1.075)
+
+tracklist = tracklist + BioCircosSNPTrack('Gene Type', points_chromosomes_receptor, points_coordinates_receptor, 
+  points_values_receptor, colors = c("darkgreen", "white", "white", "white", "white", "white", "white", "white", "white", "white", "darkgreen", "darkgreen", "white", "white", "white", "white", "white"), minRadius = 1.10, maxRadius = 1.10)
+
+
+
+#tracklist = tracklist + BioCircosTextTrack("testText", 'mDRG to Synovial Fibroblast', weight = "bold", size = '1em', x = -0.46, y = -1.25, displayGenomeBorder = TRUE)
+
+links_chromosomes_1 = c('Receptor', 'Receptor', 'Receptor') # Chromosomes on which the links should start
+links_chromosomes_2 = c('Ligand', 'Ligand', 'Ligand') # Chromosomes on which the links should end
+
+# Coordinates to place start of links. The coordinates below correspond to the sequence given by seq(3, 113, length.out = 9) Their starting coordinate must be repeated for the number of connections between them and the number of receptors they are connected to.
+links_pos_1 = c(3, 3, 18.7, 34.4, 3, 3, 34.4, 34.4, 3, 3, 34.4, 18.7, 34.4, 50.1, 50.1, 3, 3, 34.4, 65.9, 3, 3, 81.6, 34.4, 34.4, 3, 3, 34.4, 34.4, 34.4, 3, 3, 34.4, 97.3, 34.4, 50.1, 50.1, 34.4, 3, 3, 34.4, 65.9, 81.6, 97.3, 3, 81.6, 34.4, 3, 34.4, 3, 97.3, 34.4, 50.1, 3, 65.9, 81.6, 97.3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 18.7, 3, 3, 3, 3, 18.7, 3, 3, 3, 3, 3, 81.6, 3, 3, 34.4, 3, 3, 3, 34.4, 3, 3, 3, 34.4, 3, 81.6, 3, 3, 34.4, 3, 3, 34.4, 3, 3, 34.4, 3, 3, 3, 3, 3, 34.4, 3, 3, 3, 34.4, 3, 3, 3, 34.4, 50.1, 50.1, 3, 3, 3, 65.9, 3, 3, 3, 81.6, 18.7, 3, 3, 3, 3, 3, 3, 18.7, 50.1, 3, 3, 3, 81.6, 3, 3, 34.4, 3, 34.4, 3, 34.4, 3, 3, 3, 50.1, 3, 65.9, 3, 3, 81.6, 81.6, 34.4, 3, 3, 34.4, 34.4, 3, 3, 113, 34.4, 97.3, 50.1, 50.1, 34.4, 3, 3, 81.6, 34.4, 65.9, 81.6, 97.3, 3, 34.4, 3, 34.4, 3, 34.4, 3, 18.7, 18.7)
+# Coordinates to place end of links. The coordinates below correspond to the sequence given by seq(3, 241, length.out = 17)
+links_pos_2 = c(3, 17.9, 32.8, 47.6, 3, 17.9, 62.5, 47.6, 3, 17.9, 62.5, 32.8, 47.6, 77.4, 92.3, 3, 17.9, 62.5, 107.1, 3, 17.9, 122, 47.6, 136.9, 3, 17.9, 62.5, 47.6, 136.9, 3, 17.9, 62.5, 151.8, 47.6, 77.4, 92.3, 136.9, 3, 17.9, 62.5, 107.1, 122, 151.8, 3, 122, 47.6, 3, 47.6, 3, 151.8, 47.6, 77.4, 3, 107.1, 122, 151.8, 166.6, 181.5, 166.6, 181.5, 166.6, 181.5, 166.6, 181.5, 3, 196.4, 211.3, 3, 196.4, 3, 196.4, 211.3, 3, 196.4, 3, 196.4, 181.5, 122, 3, 196.4, 226.1, 181.5, 3, 196.4, 226.1, 181.5, 3, 196.4, 226.1, 181.5, 122, 3, 196.4, 136.9, 3, 196.4, 136.9, 3, 196.4, 136.9, 3, 196.4, 3, 166.6, 17.9, 47.6, 3, 166.6, 17.9, 47.6, 3, 166.6, 17.9, 47.6, 77.4, 92.3, 3, 166.6, 17.9, 107.1, 3, 196.4, 181.5, 122, 211.3, 3, 196.4, 181.5, 3, 196.4, 181.5, 211.3, 77.4, 3, 196.4, 181.5, 122, 3, 3, 62.5, 3, 62.5, 3, 62.5, 3, 3, 3, 77.4, 3, 107.1, 3, 17.9, 241, 122, 136.9, 3, 17.9, 62.5, 136.9, 3, 17.9, 241, 62.5, 151.8, 77.4, 92.3, 136.9, 3, 17.9, 241, 62.5, 107.1, 122, 151.8, 196.4, 136.9, 196.4, 136.9, 196.4, 136.9, 196.4, 211.3, 211.3)
+# The labels are given at the end of the link. 
+links_labels_12 = c('FGF1', 'FGF9', 'TGFB2', 'ADAM9', '', '', 'LTBP3', '', '', '', '', '', '', 'CLSTN1', 'CLSTN3', '', '', '', 'NFASC', '', '', 'PTN', '', 'EDIL3', '', '', '', '', '', '', '', '', 'SHH', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', 'FGF12', 'NCAM1', '', '', '', '', '', '', '', 'FGF13', 'TGFB1', '', '', '', '', '', '', '', '', '', '', '', '', '', 'LTBP1', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', 'LRRC4B', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '') 
+
+tracklist = tracklist + BioCircosLinkTrack('myLinkTrack', links_chromosomes_1, links_pos_1,
+  links_pos_1, links_chromosomes_2, links_pos_2, links_pos_2,
+  maxRadius = 0.5, width = "0.03em", color = 'brown', labelSize = "0.75em", labels = links_labels_12)
+
+links_chromosomes_3 = c('Ligand', 'Ligand', 'Ligand') # Chromosomes on which the links should start
+links_chromosomes_4 = c('Receptor', 'Receptor', 'Receptor') # Chromosomes on which the links should end
+
+# Now we start at the ligands
+links_pos_3 = c(3, 17.9, 32.8, 47.6, 3, 17.9, 62.5, 47.6, 3, 17.9, 62.5, 32.8, 47.6, 77.4, 92.3, 3, 17.9, 62.5, 107.1, 3, 17.9, 122, 47.6, 136.9, 3, 17.9, 62.5, 47.6, 136.9, 3, 17.9, 62.5, 151.8, 47.6, 77.4, 92.3, 136.9, 3, 17.9, 62.5, 107.1, 122, 151.8, 3, 122, 47.6, 3, 47.6, 3, 151.8, 47.6, 77.4, 3, 107.1, 122, 151.8, 166.6, 181.5, 166.6, 181.5, 166.6, 181.5, 166.6, 181.5, 3, 196.4, 211.3, 3, 196.4, 3, 196.4, 211.3, 3, 196.4, 3, 196.4, 181.5, 122, 3, 196.4, 226.1, 181.5, 3, 196.4, 226.1, 181.5, 3, 196.4, 226.1, 181.5, 122, 3, 196.4, 136.9, 3, 196.4, 136.9, 3, 196.4, 136.9, 3, 196.4, 3, 166.6, 17.9, 47.6, 3, 166.6, 17.9, 47.6, 3, 166.6, 17.9, 47.6, 77.4, 92.3, 3, 166.6, 17.9, 107.1, 3, 196.4, 181.5, 122, 211.3, 3, 196.4, 181.5, 3, 196.4, 181.5, 211.3, 77.4, 3, 196.4, 181.5, 122, 3, 3, 62.5, 3, 62.5, 3, 62.5, 3, 3, 3, 77.4, 3, 107.1, 3, 17.9, 241, 122, 136.9, 3, 17.9, 62.5, 136.9, 3, 17.9, 241, 62.5, 151.8, 77.4, 92.3, 136.9, 3, 17.9, 241, 62.5, 107.1, 122, 151.8, 196.4, 136.9, 196.4, 136.9, 196.4, 136.9, 196.4, 211.3, 211.3)
+# Now we end at the receptors
+links_pos_4 = c(3, 3, 18.7, 34.4, 3, 3, 34.4, 34.4, 3, 3, 34.4, 18.7, 34.4, 50.1, 50.1, 3, 3, 34.4, 65.9, 3, 3, 81.6, 34.4, 34.4, 3, 3, 34.4, 34.4, 34.4, 3, 3, 34.4, 97.3, 34.4, 50.1, 50.1, 34.4, 3, 3, 34.4, 65.9, 81.6, 97.3, 3, 81.6, 34.4, 3, 34.4, 3, 97.3, 34.4, 50.1, 3, 65.9, 81.6, 97.3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 18.7, 3, 3, 3, 3, 18.7, 3, 3, 3, 3, 3, 81.6, 3, 3, 34.4, 3, 3, 3, 34.4, 3, 3, 3, 34.4, 3, 81.6, 3, 3, 34.4, 3, 3, 34.4, 3, 3, 34.4, 3, 3, 3, 3, 3, 34.4, 3, 3, 3, 34.4, 3, 3, 3, 34.4, 50.1, 50.1, 3, 3, 3, 65.9, 3, 3, 3, 81.6, 18.7, 3, 3, 3, 3, 3, 3, 18.7, 50.1, 3, 3, 3, 81.6, 3, 3, 34.4, 3, 34.4, 3, 34.4, 3, 3, 3, 50.1, 3, 65.9, 3, 3, 81.6, 81.6, 34.4, 3, 3, 34.4, 34.4, 3, 3, 113, 34.4, 97.3, 50.1, 50.1, 34.4, 3, 3, 81.6, 34.4, 65.9, 81.6, 97.3, 3, 34.4, 3, 34.4, 3, 34.4, 3, 18.7, 18.7)
+# These links are for the receptors
+links_labels_34 = c('FGFR1', '', 'TGFBR3', 'ITGB5', '', '', '', '', '', '', '', '', '', 'APP', '', '', '', '', 'ANK3', '', '', 'PTPRS', '', '', '', '', '', '', '', '', '', '', 'CDON', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', 'PTPRD', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '')
+
+tracklist = tracklist + BioCircosLinkTrack('myLinkTrack', links_chromosomes_3, links_pos_3,
+  links_pos_3, links_chromosomes_4, links_pos_4, links_pos_4,
+  maxRadius = 0.5, width = "0.03em", color = 'brown', labelSize = "0.75em", labels = links_labels_34, labelPadding = 3)
+
+#links_chromosomes_5 = c('ligand', 'hDRG', 'hDRG') # Chromosomes on which the links should start
+#links_chromosomes_6 = c('RA', 'RA', 'RA') # Chromosomes on which the links should end
+#links_pos_5 = c(180.08, 187.46, 194.84, 202.22, 209.59, 216.97, 224.35, 231.73, 239.11, 216.97, 246.49, 253.86, 261.24, 268.62, 276)
+#links_pos_6 = c(48, 55.5, 55.5, 55.5, 55.5, 55.5, 55.5, 55.5, 63, 63, 63, 63, 70.5, 70.5, 78)
+#links_labels_56 = c("", "", '', '', '', '', '', '', "", '', '', '', "", '', "")
+
+#tracklist = tracklist + BioCircosLinkTrack('myLinkTrack', links_chromosomes_5, links_pos_5,
+#  links_pos_5, links_chromosomes_6, links_pos_6, links_pos_6,
+#  maxRadius = 0.5, width = "0.01em", color = 'brown', labelSize = "0.5em", labels = links_labels_56)
+
+# Create inside arc for RA scRNA gene identification
+arcs_chromosomes_ra = c('Receptor') # Chromosomes on which the arcs should be displayed
+arcs_begin_ra = c(0)
+arcs_end_ra = c(116)
+
+tracklist = tracklist + BioCircosArcTrack('myArcTrack', arcs_chromosomes_ra, arcs_begin_ra, arcs_end_ra, minRadius = 1.15, maxRadius = 1.20, colors = 'forestgreen') 
+
+# Create inside arc for RA scRNA gene identification
+arcs_chromosomes_hdrg = c('Ligand') # Chromosomes on which the arcs should be displayed
+arcs_begin_hdrg = c(0)
+arcs_end_hdrg = c(244)
+
+tracklist = tracklist + BioCircosArcTrack('myArcTrack', arcs_chromosomes_hdrg, arcs_begin_hdrg, arcs_end_hdrg, minRadius = 1.15, maxRadius = 1.20, colors = 'deeppink3')
+
+
+tracklist = tracklist + BioCircosTextTrack('MytextTrack', 'Receptor', x = 0.75, y = -1, size = "1em",
+  weight = "bold", opacity = 1, color = "#000000")
+
+tracklist = tracklist + BioCircosTextTrack('MytextTrack', 'Ligand', x = -0.95, y = 1.1, size = "1em",
+  weight = "bold", opacity = 1, color = "#000000")
+
+#tracklist = tracklist + BioCircosArcTrack('myArcTrack', arcs_chromosomes, arcs_begin, arcs_end, minRadius = 0.85, maxRadius = 0.99, colors = 'forestgreen') 
+
+BioCircos(tracklist, genome = myGenome, genomeFillColor = c('white', 'white'), chrPad = 0.05, displayGenomeBorder = FALSE, yChr =  FALSE,
+  genomeTicksDisplay = FALSE,  genomeLabelTextSize = 0, genomeLabelDy = 0, width = 650, height = 650)
+```
+
+Below we plot the legend for the cell types.
+
+```{r}
+plot(NULL ,xaxt='n',yaxt='n',bty='n',ylab='',xlab='', xlim=0:1, ylim=0:1)
+legend("topleft", legend =c('Abeta-Field (8)', 'Abeta-RA-LTMR (10)', 'Adelta-LTMR (6)', 'CGRP-Alpha (3)', 'CGRP-Beta (5)', 'CGRP-Epsilion (5)', 'CGRP-Eta (6)', 'CGRP-Gamma (5)', 'CGRP-Theta (2)', 'CGRP-Zeta (3)', 'Proprioceptors (11)', 'Sst (2)', 'C-LTMR (3)'), pch=16, pt.cex=1, cex=0.95, bty='n',
+    col = c('antiquewhite4', 'magenta', 'gold', 'black', 'darkgray', 'blue', 'blueviolet', 'brown', 'cadetblue1', 'chartreuse3', 'orange', 'coral', 'darkgreen'))
+mtext("mDRG Neuronal Cell Types", at=0.19, cex=1.1)
+```
+
+Below we plot the legend for the fibroblast subtypes.
+
+```{r}
+plot(NULL ,xaxt='n',yaxt='n',bty='n',ylab='',xlab='', xlim=0:1, ylim=0:1)
+legend("topleft", legend =c('F1 (3)', 'F2 (2)', 'F3 (5)', 'F4 (6)'), pch=16, pt.cex=3, cex=1.5, bty='n', col = c('blue', 'green', 'orange', 'red'))
+mtext("Fibroblast Subtypes", at=0.24, cex=2)
+```
